@@ -1,0 +1,8 @@
+# Rust's output directory
+target
+.idea
+*.lock
+
+# Local settings
+.soroban
+.stellar
