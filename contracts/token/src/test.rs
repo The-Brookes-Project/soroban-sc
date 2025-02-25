@@ -1,6 +1,6 @@
-#[cfg(test)]
+#![cfg(test)]
 use super::*;
-use soroban_sdk::{Env};
+use soroban_sdk::Env;
 use soroban_sdk::testutils::Address as SorobanAddress;
 
 #[test]

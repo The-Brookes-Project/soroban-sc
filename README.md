@@ -59,8 +59,8 @@ This repository uses the recommended structure for a Soroban project:
 
 ```bash
 soroban contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/security_token.wasm \
-  --source-account ADMIN_ACCOUNT \
+  --wasm target/wasm32-unknown-unknown/release/verse_token.wasm \
+  --source ADMIN \
   --network testnet
 ```
 
