@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Map, String, Vec, symbol_short,
+    contract, contractimpl, contracttype, token, Address, Env, Map, String, Vec, symbol_short,
     Error};
 
 // Define token metadata structure
@@ -13,6 +13,8 @@ pub struct TokenMetadata {
     pub total_supply: i128,
     pub issuer: Address,
     pub home_domain: String,
+    pub usdc_price: i128, // Price in USDC per token (in smallest unit)
+    pub usdc_token: Address, // USDC token contract address
 }
 
 // Define compliance status enum
@@ -38,6 +40,7 @@ pub struct SecurityToken {
     pub authorization_revocable: bool,
     pub clawback_enabled: bool,
     pub transfer_restricted: bool,
+    pub usdc_balance: i128, // Track USDC collected from purchases
 }
 
 // Define event types that the contract will emit - using tuple variants
@@ -49,6 +52,8 @@ pub enum SecurityTokenEvent {
     KycVerified(Address, bool), // address, status
     AuthorizationChanged(bool, bool), // required, revocable
     ClawbackExecuted(Address, i128), // from, amount
+    Purchase(Address, i128, i128), // buyer, token_amount, usdc_amount
+    UsdcWithdrawn(Address, i128), // admin, amount
 }
 
 // Main contract
@@ -67,6 +72,8 @@ impl SecurityTokenContract {
         issuer: Address,
         home_domain: String,
         admin: Address,
+        usdc_price: i128,
+        usdc_token: Address,
     ) -> SecurityToken {
         // Ensure the contract is only initialized once
         if env.storage().instance().has(&symbol_short!("TOKEN")) {
@@ -80,6 +87,9 @@ impl SecurityTokenContract {
         if decimals > 7 {
             panic!("Decimals cannot exceed 7");
         }
+        if usdc_price <= 0 {
+            panic!("USDC price must be positive");
+        }
 
         // Create token metadata
         let metadata = TokenMetadata {
@@ -89,6 +99,8 @@ impl SecurityTokenContract {
             total_supply,
             issuer: issuer.clone(),
             home_domain,
+            usdc_price,
+            usdc_token,
         };
 
         // Create initial admin list
@@ -116,6 +128,7 @@ impl SecurityTokenContract {
             authorization_revocable: true,
             clawback_enabled: true,
             transfer_restricted: true,
+            usdc_balance: 0,
         };
 
         // Store token in contract storage
@@ -335,6 +348,107 @@ impl SecurityTokenContract {
 
         Ok(())
     }
+    
+    // Direct purchase tokens with USDC
+    pub fn purchase(
+        env: Env,
+        buyer: Address,
+        token_amount: i128,
+    ) -> Result<(), Error> {
+        buyer.require_auth();
+        
+        // Validate amount
+        if token_amount <= 0 {
+            return Err(Error::from_contract_error(15));
+        }
+        
+        // Load token from storage
+        let mut token = Self::get_token(&env);
+        
+        // Check KYC and compliance status for buyer
+        Self::check_compliance_requirements(&token, &token.metadata.issuer, &buyer)?;
+        
+        // Calculate USDC amount needed
+        let usdc_amount = token_amount * token.metadata.usdc_price / 10i128.pow(token.metadata.decimals);
+        if usdc_amount <= 0 {
+            return Err(Error::from_contract_error(16));
+        }
+        
+        // Get USDC token client
+        let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
+        
+        // Transfer USDC from buyer to contract
+        usdc_token_client.transfer(&buyer, &env.current_contract_address(), &usdc_amount);
+        
+        // Update token balances
+        let issuer_balance = token.balances.get(token.metadata.issuer.clone()).unwrap_or(0);
+        let buyer_balance = token.balances.get(buyer.clone()).unwrap_or(0);
+        
+        // Check if issuer has enough tokens
+        if issuer_balance < token_amount {
+            return Err(Error::from_contract_error(17));
+        }
+        
+        // Update token balances
+        token.balances.set(token.metadata.issuer.clone(), issuer_balance - token_amount);
+        token.balances.set(buyer.clone(), buyer_balance + token_amount);
+        
+        // Update USDC balance
+        token.usdc_balance += usdc_amount;
+        
+        // Store updated token state
+        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        
+        // Emit purchase event
+        env.events().publish(
+            (symbol_short!("VERSEPROP"),),
+            SecurityTokenEvent::Purchase(buyer.clone(), token_amount, usdc_amount),
+        );
+        
+        Ok(())
+    }
+    
+    // Admin function to withdraw accumulated USDC
+    pub fn withdraw_usdc(
+        env: Env,
+        admin: Address,
+        amount: i128,
+    ) -> Result<(), Error> {
+        admin.require_auth();
+        
+        // Load token from storage
+        let mut token = Self::get_token(&env);
+        
+        // Check if caller is admin
+        if !Self::is_admin(&token, &admin) {
+            return Err(Error::from_contract_error(18));
+        }
+        
+        // Validate amount
+        if amount <= 0 || amount > token.usdc_balance {
+            return Err(Error::from_contract_error(19));
+        }
+        
+        // Get USDC token client
+        let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
+        
+        // Transfer USDC from contract to admin
+        usdc_token_client.transfer(&env.current_contract_address(), &admin, &amount);
+        
+        // Update USDC balance
+        token.usdc_balance -= amount;
+        
+        // Store updated token state
+        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        
+        // Emit withdrawal event
+        env.events().publish(
+            (symbol_short!("VERSEPROP"),),
+            SecurityTokenEvent::UsdcWithdrawn(admin.clone(), amount),
+        );
+        
+        Ok(())
+    }
 
     // Set transfer restriction flag
     pub fn set_transfer_restriction(
@@ -387,6 +501,18 @@ impl SecurityTokenContract {
     pub fn is_kyc_verified(env: Env, address: Address) -> bool {
         let token = Self::get_token(&env);
         token.kyc_verified.get(address).unwrap_or(false)
+    }
+    
+    // View function to check accumulated USDC balance
+    pub fn usdc_balance(env: Env) -> i128 {
+        let token = Self::get_token(&env);
+        token.usdc_balance
+    }
+    
+    // View function to get token price in USDC
+    pub fn token_price(env: Env) -> i128 {
+        let token = Self::get_token(&env);
+        token.metadata.usdc_price
     }
 
     // Internal helper functions

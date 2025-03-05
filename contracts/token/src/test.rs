@@ -1,7 +1,21 @@
 #![cfg(test)]
 use super::*;
-use soroban_sdk::Env;
-use soroban_sdk::testutils::Address as SorobanAddress;
+use soroban_sdk::{
+    Env, 
+    testutils::{Address as SorobanAddress},
+    token,
+};
+
+fn create_token_contract<'a>(
+    e: &Env,
+    admin: &Address,
+) -> (token::Client<'a>, token::StellarAssetClient<'a>) {
+    let sac = e.register_stellar_asset_contract_v2(admin.clone());
+    (
+        token::Client::new(e, &sac.address()),
+        token::StellarAssetClient::new(e, &sac.address()),
+    )
+}
 
 #[test]
 fn test_initialize() {
@@ -9,6 +23,10 @@ fn test_initialize() {
     let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
+    
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
@@ -23,6 +41,8 @@ fn test_initialize() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
+            100_000, // 0.1 USDC per token
+            usdc_token_client.address
         )
     });
 
@@ -32,6 +52,7 @@ fn test_initialize() {
     assert_eq!(client.get_metadata().total_supply, 1_000_000_000_000);
     assert_eq!(client.get_metadata().issuer, issuer);
     assert_eq!(client.get_metadata().home_domain, String::from_str(&env, "example.com"));
+    assert_eq!(client.token_price(), 100_000);
     assert_eq!(client.balance(&issuer), 1_000_000_000_000);
 }
 
@@ -43,6 +64,10 @@ fn test_transfer_with_compliance() {
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
 
     // Create client
     let client = SecurityTokenContractClient::new(&env, &contract_id);
@@ -58,6 +83,8 @@ fn test_transfer_with_compliance() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
+            100_000, // 0.1 USDC per token
+            usdc_token_client.address
         )
     });
 
@@ -101,6 +128,10 @@ fn test_clawback() {
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
 
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Initialize token
@@ -114,6 +145,8 @@ fn test_clawback() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
+            100_000, // 0.1 USDC per token
+            usdc_token_client.address
         )
     });
 
@@ -138,4 +171,93 @@ fn test_clawback() {
     // Verify balance after clawback
     let final_balance = client.balance(&user1);
     assert_eq!(final_balance, 75_000);
+}
+
+#[test]
+fn test_purchase_and_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+    let usdc_token_admin_client = usdc_token.1;
+
+    let current_ledger = env.ledger().sequence();
+    let expiration_ledger = current_ledger + 100;
+
+    usdc_token_client.approve(
+        &buyer,
+        &contract_id,       // e.g. your SecurityToken contract's address
+        &1_000_000_000i128, // allowance
+        &expiration_ledger
+    );
+
+
+    // Mint USDC to buyer
+    usdc_token_admin_client.mint(&buyer, &1_000_000_000);
+
+    // Create security token client
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    
+    // Initialize token with price of 0.1 USDC per token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000, // 0.1 USDC per token
+            usdc_token_client.address.clone()
+        )
+    });
+
+
+
+    // Set KYC and compliance status
+    client.set_kyc_status(&admin, &issuer, &true);
+    client.set_kyc_status(&admin, &buyer, &true);
+    client.set_compliance_status(&admin, &issuer, &ComplianceStatus::Approved);
+    client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
+
+    // Initial balances
+    let initial_buyer_token_balance = client.balance(&buyer);
+    let initial_issuer_token_balance = client.balance(&issuer);
+    let initial_buyer_usdc_balance = usdc_token_client.balance(&buyer);
+    assert_eq!(initial_buyer_token_balance, 0);
+    assert_eq!(initial_issuer_token_balance, 1_000_000_000_000);
+    assert_eq!(initial_buyer_usdc_balance, 1_000_000_000);
+    
+    // Buyer purchases 500,000 tokens for 50,000,000 (0.1 USDC per token)
+    let purchase_amount = 500_000_000;
+    client.purchase(&buyer, &purchase_amount);
+    
+    // Check token balances after purchase
+    let buyer_token_balance = client.balance(&buyer);
+    let issuer_token_balance = client.balance(&issuer);
+    let buyer_usdc_balance = usdc_token_client.balance(&buyer);
+    let contract_usdc_balance = client.usdc_balance();
+    
+    assert_eq!(buyer_token_balance, 500_000_000);
+    assert_eq!(issuer_token_balance, 999_500_000_000);
+    assert_eq!(buyer_usdc_balance, 950_000_000); // 1B - 50M
+    assert_eq!(contract_usdc_balance, 50_000_000);
+    
+    // Admin withdraws USDC
+    client.withdraw_usdc(&admin, &30_000_000);
+    
+    // Check balances after withdrawal
+    let admin_usdc_balance = usdc_token_client.balance(&admin);
+    let updated_contract_usdc_balance = client.usdc_balance();
+    
+    assert_eq!(admin_usdc_balance, 30_000_000);
+    assert_eq!(updated_contract_usdc_balance, 20_000_000); // 50M - 30M
 }
