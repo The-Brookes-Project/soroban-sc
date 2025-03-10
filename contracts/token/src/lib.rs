@@ -13,7 +13,7 @@ pub struct TokenMetadata {
     pub total_supply: i128,
     pub issuer: Address,
     pub home_domain: String,
-    pub usdc_price: i128, // Price in USDC per token (in smallest unit)
+    pub usdc_price: i128, // Price in USDC per token (in the smallest unit)
     pub usdc_token: Address, // USDC token contract address
 }
 

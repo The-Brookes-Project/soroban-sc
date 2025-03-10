@@ -68,17 +68,19 @@ soroban contract deploy \
 
 ```bash
 soroban contract invoke \
-  --id CONTRACT_ID \
-  --source-account ADMIN_ACCOUNT \
+  --id CA46SS7OY3XCD4LCERDYWAMZNIA67AINSL3KKHTXRTXJ6GO5P3CI3QXA \
+  --source-account ADMIN \
   --network testnet \
   -- initialize \
-  --name "Real Estate Token" \
-  --symbol "REALT" \
+  --name "Verseprop Token" \
+  --symbol "VSP" \
   --decimals 6 \
   --total-supply 100000000000 \
-  --issuer ISSUER_ACCOUNT \
-  --home-domain "example.com" \
-  --admin ADMIN_ACCOUNT
+  --issuer ISSUER \
+  --home-domain "verseprop.com" \
+  --admin ADMIN \
+  --usdc_price 10000000 \
+  --usdc_token CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 ```
 
 ### Manage Compliance
