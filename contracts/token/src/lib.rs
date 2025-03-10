@@ -1,7 +1,8 @@
 #![no_std]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, token, Address, Env, Map, String, Vec, symbol_short,
-    Error};
+use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, Map, String, Vec,
+                  symbol_short, Error, Symbol};
+
+const TOKEN_KEY: Symbol = symbol_short!("VERSEPROP");
 
 // Define token metadata structure
 #[contracttype]
@@ -76,7 +77,7 @@ impl SecurityTokenContract {
         usdc_token: Address,
     ) -> SecurityToken {
         // Ensure the contract is only initialized once
-        if env.storage().instance().has(&symbol_short!("TOKEN")) {
+        if env.storage().instance().has(&TOKEN_KEY) {
             panic!("Token already initialized");
         }
 
@@ -132,11 +133,11 @@ impl SecurityTokenContract {
         };
 
         // Store token in contract storage
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit initialization event using tuple for topics
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::Init(token.metadata.clone()),
         );
 
@@ -170,11 +171,11 @@ impl SecurityTokenContract {
         Self::execute_transfer(&env, &mut token, &from, &to, amount)?;
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit transfer event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::Transfer(from.clone(), to.clone(), amount),
         );
 
@@ -202,11 +203,11 @@ impl SecurityTokenContract {
         token.kyc_verified.set(address.clone(), verified);
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::KycVerified(address.clone(), verified),
         );
 
@@ -234,11 +235,11 @@ impl SecurityTokenContract {
         token.compliance_status.set(address.clone(), status.clone());
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::ComplianceUpdated(address.clone(), status),
         );
 
@@ -274,14 +275,16 @@ impl SecurityTokenContract {
         }
 
         // Update balances
-        token.balances.set(from.clone(), current_balance - amount);
+        let new_balance = current_balance.checked_sub(amount)
+            .ok_or(Error::from_contract_error(14))?;
+        token.balances.set(from.clone(), new_balance);
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::ClawbackExecuted(from.clone(), amount),
         );
 
@@ -311,7 +314,7 @@ impl SecurityTokenContract {
         token.admins.push_back(new_admin);
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         Ok(())
     }
@@ -338,17 +341,17 @@ impl SecurityTokenContract {
         token.authorization_revocable = revocable;
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         // Emit event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::AuthorizationChanged(required, revocable),
         );
 
         Ok(())
     }
-    
+
     // Direct purchase tokens with USDC
     pub fn purchase(
         env: Env,
@@ -356,58 +359,71 @@ impl SecurityTokenContract {
         token_amount: i128,
     ) -> Result<(), Error> {
         buyer.require_auth();
-        
+
         // Validate amount
         if token_amount <= 0 {
             return Err(Error::from_contract_error(15));
         }
-        
+
         // Load token from storage
         let mut token = Self::get_token(&env);
-        
+
         // Check KYC and compliance status for buyer
         Self::check_compliance_requirements(&token, &token.metadata.issuer, &buyer)?;
-        
+
         // Calculate USDC amount needed
-        let usdc_amount = token_amount * token.metadata.usdc_price / 10i128.pow(token.metadata.decimals);
+        let decimals_pow = 10i128.checked_pow(token.metadata.decimals)
+            .ok_or(Error::from_contract_error(16))?;
+
+        let usdc_amount = token_amount.checked_mul(token.metadata.usdc_price)
+            .ok_or(Error::from_contract_error(16))?
+            .checked_div(decimals_pow)
+            .ok_or(Error::from_contract_error(16))?;
+
         if usdc_amount <= 0 {
             return Err(Error::from_contract_error(16));
         }
-        
+
         // Get USDC token client
         let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
-        
+
         // Transfer USDC from buyer to contract
         usdc_token_client.transfer(&buyer, &env.current_contract_address(), &usdc_amount);
-        
+
         // Update token balances
         let issuer_balance = token.balances.get(token.metadata.issuer.clone()).unwrap_or(0);
         let buyer_balance = token.balances.get(buyer.clone()).unwrap_or(0);
-        
+
         // Check if issuer has enough tokens
         if issuer_balance < token_amount {
             return Err(Error::from_contract_error(17));
         }
-        
+
         // Update token balances
-        token.balances.set(token.metadata.issuer.clone(), issuer_balance - token_amount);
-        token.balances.set(buyer.clone(), buyer_balance + token_amount);
-        
+        let new_issuer_balance = issuer_balance.checked_sub(token_amount)
+            .ok_or(Error::from_contract_error(14))?;
+        let new_buyer_balance = buyer_balance.checked_add(token_amount)
+            .ok_or(Error::from_contract_error(14))?;
+
+        token.balances.set(token.metadata.issuer.clone(), new_issuer_balance);
+        token.balances.set(buyer.clone(), new_buyer_balance);
+
         // Update USDC balance
-        token.usdc_balance += usdc_amount;
-        
+        token.usdc_balance = token.usdc_balance.checked_add(usdc_amount)
+            .ok_or(Error::from_contract_error(14))?;
+
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
-        
+        env.storage().instance().set(&TOKEN_KEY, &token);
+
         // Emit purchase event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::Purchase(buyer.clone(), token_amount, usdc_amount),
         );
-        
+
         Ok(())
     }
-    
+
     // Admin function to withdraw accumulated USDC
     pub fn withdraw_usdc(
         env: Env,
@@ -415,38 +431,39 @@ impl SecurityTokenContract {
         amount: i128,
     ) -> Result<(), Error> {
         admin.require_auth();
-        
+
         // Load token from storage
         let mut token = Self::get_token(&env);
-        
+
         // Check if caller is admin
         if !Self::is_admin(&token, &admin) {
             return Err(Error::from_contract_error(18));
         }
-        
+
         // Validate amount
         if amount <= 0 || amount > token.usdc_balance {
             return Err(Error::from_contract_error(19));
         }
-        
+
         // Get USDC token client
         let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
-        
+
         // Transfer USDC from contract to admin
         usdc_token_client.transfer(&env.current_contract_address(), &admin, &amount);
-        
+
         // Update USDC balance
-        token.usdc_balance -= amount;
-        
+        token.usdc_balance = token.usdc_balance.checked_sub(amount)
+            .ok_or(Error::from_contract_error(14))?;
+
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
-        
+        env.storage().instance().set(&TOKEN_KEY, &token);
+
         // Emit withdrawal event
         env.events().publish(
-            (symbol_short!("VERSEPROP"),),
+            (TOKEN_KEY,),
             SecurityTokenEvent::UsdcWithdrawn(admin.clone(), amount),
         );
-        
+
         Ok(())
     }
 
@@ -472,7 +489,7 @@ impl SecurityTokenContract {
         token.transfer_restricted = restricted;
 
         // Store updated token state
-        env.storage().instance().set(&symbol_short!("TOKEN"), &token);
+        env.storage().instance().set(&TOKEN_KEY, &token);
 
         Ok(())
     }
@@ -502,13 +519,13 @@ impl SecurityTokenContract {
         let token = Self::get_token(&env);
         token.kyc_verified.get(address).unwrap_or(false)
     }
-    
+
     // View function to check accumulated USDC balance
     pub fn usdc_balance(env: Env) -> i128 {
         let token = Self::get_token(&env);
         token.usdc_balance
     }
-    
+
     // View function to get token price in USDC
     pub fn token_price(env: Env) -> i128 {
         let token = Self::get_token(&env);
@@ -521,7 +538,7 @@ impl SecurityTokenContract {
     fn get_token(env: &Env) -> SecurityToken {
         env.storage()
             .instance()
-            .get(&symbol_short!("TOKEN"))
+            .get(&TOKEN_KEY)
             .expect("Token not initialized")
     }
 
@@ -593,8 +610,13 @@ impl SecurityTokenContract {
         }
 
         // Update balances
-        token.balances.set(from.clone(), from_balance - amount);
-        token.balances.set(to.clone(), to_balance + amount);
+        let new_from_balance = from_balance.checked_sub(amount)
+            .ok_or(Error::from_contract_error(14))?;
+        let new_to_balance = to_balance.checked_add(amount)
+            .ok_or(Error::from_contract_error(14))?;
+
+        token.balances.set(from.clone(), new_from_balance);
+        token.balances.set(to.clone(), new_to_balance);
 
         Ok(())
     }
