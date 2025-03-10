@@ -55,6 +55,8 @@ pub enum SecurityTokenEvent {
     ClawbackExecuted(Address, i128), // from, amount
     Purchase(Address, i128, i128), // buyer, token_amount, usdc_amount
     UsdcWithdrawn(Address, i128), // admin, amount
+    AdminAdded(Address, Address), // admin, new_admin
+    TransferRestrictionChanged(bool), // restricted status
 }
 
 // Main contract
@@ -76,6 +78,12 @@ impl SecurityTokenContract {
         usdc_price: i128,
         usdc_token: Address,
     ) -> SecurityToken {
+        // Get the deployer's address (the contract ID before initialization)
+        let deployer = env.current_contract_address();
+
+        // Require authorization from the deployer
+        deployer.require_auth();
+
         // Ensure the contract is only initialized once
         if env.storage().instance().has(&TOKEN_KEY) {
             panic!("Token already initialized");
@@ -311,10 +319,16 @@ impl SecurityTokenContract {
         }
 
         // Add to admin list
-        token.admins.push_back(new_admin);
+        token.admins.push_back(new_admin.clone());
 
         // Store updated token state
         env.storage().instance().set(&TOKEN_KEY, &token);
+
+        // Emit admin added event
+        env.events().publish(
+            (TOKEN_KEY,),
+            SecurityTokenEvent::AdminAdded(admin.clone(), new_admin),
+        );
 
         Ok(())
     }
@@ -490,6 +504,12 @@ impl SecurityTokenContract {
 
         // Store updated token state
         env.storage().instance().set(&TOKEN_KEY, &token);
+
+        // Emit transfer restriction changed event
+        env.events().publish(
+            (TOKEN_KEY,),
+            SecurityTokenEvent::TransferRestrictionChanged(restricted),
+        );
 
         Ok(())
     }
