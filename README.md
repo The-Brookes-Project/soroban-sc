@@ -25,11 +25,11 @@ This repository uses the recommended structure for a Soroban project:
 ```text
 .
 ├── contracts
-│   └── token
-│       ├── src
-│       │   ├── lib.rs
-│       │   └── test.rs
-│       └── Cargo.toml
+│   └── token
+│       ├── src
+│       │   ├── lib.rs
+│       │   └── test.rs
+│       └── Cargo.toml
 ├── Cargo.toml
 └── README.md
 ```
@@ -80,7 +80,7 @@ soroban contract invoke \
   --home-domain "verseprop.com" \
   --admin ADMIN \
   --usdc_price 10000000 \
-  --usdc_token CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+  --usdc_token CBIELTK6YBZJU5UP2WWFEIE3USCIHMXQDAMA
 ```
 
 ### Manage Compliance
