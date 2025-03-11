@@ -277,7 +277,10 @@ impl SecurityTokenContract {
         }
 
         // Get current balance
-        let current_balance = token.balances.get(from.clone()).unwrap_or(0);
+        let current_balance = token.balances.try_get(from.clone())
+            .map_err(|_| Error::from_contract_error(7))?
+            .unwrap_or(0);
+
         if current_balance < amount {
             return Err(Error::from_contract_error(7));
         }
@@ -405,8 +408,13 @@ impl SecurityTokenContract {
         usdc_token_client.transfer(&buyer, &env.current_contract_address(), &usdc_amount);
 
         // Update token balances
-        let issuer_balance = token.balances.get(token.metadata.issuer.clone()).unwrap_or(0);
-        let buyer_balance = token.balances.get(buyer.clone()).unwrap_or(0);
+        let issuer_balance = token.balances.try_get(token.metadata.issuer.clone())
+            .map_err(|_| Error::from_contract_error(17))?
+            .unwrap_or(0);
+
+        let buyer_balance = token.balances.try_get(buyer.clone())
+            .map_err(|_| Error::from_contract_error(17))?
+            .unwrap_or(0);
 
         // Check if issuer has enough tokens
         if issuer_balance < token_amount {
@@ -521,23 +529,27 @@ impl SecurityTokenContract {
     }
 
     // View function to get balance
-    pub fn balance(env: Env, address: Address) -> i128 {
+    pub fn balance(env: Env, address: Address) -> Result<i128, Error> {
         let token = Self::get_token(&env);
-        token.balances.get(address).unwrap_or(0)
+        token.balances.try_get(address)
+            .map(|opt| opt.unwrap_or(0))
+            .map_err(Error::from)
     }
 
     // View function to check compliance status
-    pub fn check_compliance(env: Env, address: Address) -> ComplianceStatus {
+    pub fn check_compliance(env: Env, address: Address) -> Result<ComplianceStatus, Error> {
         let token = Self::get_token(&env);
-        token.compliance_status
-            .get(address)
-            .unwrap_or(ComplianceStatus::Pending)
+        token.compliance_status.try_get(address)
+            .map(|opt| opt.unwrap_or(ComplianceStatus::Pending))
+            .map_err(Error::from)
     }
 
     // View function to check KYC status
-    pub fn is_kyc_verified(env: Env, address: Address) -> bool {
+    pub fn is_kyc_verified(env: Env, address: Address) -> Result<bool, Error> {
         let token = Self::get_token(&env);
-        token.kyc_verified.get(address).unwrap_or(false)
+        token.kyc_verified.try_get(address)
+            .map(|opt| opt.unwrap_or(false))
+            .map_err(Error::from)
     }
 
     // View function to check accumulated USDC balance
@@ -581,31 +593,31 @@ impl SecurityTokenContract {
         // Check authorization required flag
         if token.authorization_required {
             // Check KYC status for both addresses
-            let from_kyc = token.kyc_verified.get(from.clone()).unwrap_or(false);
-            let to_kyc = token.kyc_verified.get(to.clone()).unwrap_or(false);
+            let from_kyc = token.kyc_verified.try_get(from.clone())
+                .map_err(|_| Error::from_contract_error(12))?
+                .unwrap_or(false);
+
+            let to_kyc = token.kyc_verified.try_get(to.clone())
+                .map_err(|_| Error::from_contract_error(12))?
+                .unwrap_or(false);
 
             if !from_kyc || !to_kyc {
-                return Err(Error::from_contract_error(
-                    12
-                ));
+                return Err(Error::from_contract_error(12));
             }
 
             // Check compliance status for both addresses
-            let from_compliance = token
-                .compliance_status
-                .get(from.clone())
+            let from_compliance = token.compliance_status.try_get(from.clone())
+                .map_err(|_| Error::from_contract_error(13))?
                 .unwrap_or(ComplianceStatus::Pending);
-            let to_compliance = token
-                .compliance_status
-                .get(to.clone())
+
+            let to_compliance = token.compliance_status.try_get(to.clone())
+                .map_err(|_| Error::from_contract_error(13))?
                 .unwrap_or(ComplianceStatus::Pending);
 
             if from_compliance != ComplianceStatus::Approved
                 || to_compliance != ComplianceStatus::Approved
             {
-                return Err(Error::from_contract_error(
-                    13
-                ));
+                return Err(Error::from_contract_error(13));
             }
         }
 
@@ -621,8 +633,13 @@ impl SecurityTokenContract {
         amount: i128,
     ) -> Result<(), Error> {
         // Get current balances
-        let from_balance = token.balances.get(from.clone()).unwrap_or(0);
-        let to_balance = token.balances.get(to.clone()).unwrap_or(0);
+        let from_balance = token.balances.try_get(from.clone())
+            .map_err(|_| Error::from_contract_error(14))?
+            .unwrap_or(0);
+
+        let to_balance = token.balances.try_get(to.clone())
+            .map_err(|_| Error::from_contract_error(14))?
+            .unwrap_or(0);
 
         // Check if sender has enough balance
         if from_balance < amount {
