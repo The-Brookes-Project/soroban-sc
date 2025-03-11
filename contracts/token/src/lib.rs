@@ -193,17 +193,17 @@ impl SecurityTokenContract {
     // Set KYC verification status for an address
     pub fn set_kyc_status(
         env: Env,
-        admin: Address,
+        caller: Address,
         address: Address,
         verified: bool,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(3));
         }
 
@@ -225,17 +225,17 @@ impl SecurityTokenContract {
     // Set compliance status for an address
     pub fn set_compliance_status(
         env: Env,
-        admin: Address,
+        caller: Address,
         address: Address,
         status: ComplianceStatus,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(4));
         }
 
@@ -257,17 +257,17 @@ impl SecurityTokenContract {
     // Execute clawback of tokens (regulatory action)
     pub fn clawback(
         env: Env,
-        admin: Address,
+        caller: Address,
         from: Address,
         amount: i128,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(5));
         }
 
@@ -303,14 +303,14 @@ impl SecurityTokenContract {
     }
 
     // Add an admin to the token
-    pub fn add_admin(env: Env, admin: Address, new_admin: Address) -> Result<(), Error> {
-        admin.require_auth();
+    pub fn add_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), Error> {
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(8));
         }
 
@@ -330,7 +330,7 @@ impl SecurityTokenContract {
         // Emit admin added event
         env.events().publish(
             (TOKEN_KEY,),
-            SecurityTokenEvent::AdminAdded(admin.clone(), new_admin),
+            SecurityTokenEvent::AdminAdded(caller.clone(), new_admin),
         );
 
         Ok(())
@@ -339,17 +339,17 @@ impl SecurityTokenContract {
     // Configure authorization flags
     pub fn configure_authorization(
         env: Env,
-        admin: Address,
+        caller: Address,
         required: bool,
         revocable: bool,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(10));
         }
 
@@ -449,16 +449,16 @@ impl SecurityTokenContract {
     // Admin function to withdraw accumulated USDC
     pub fn withdraw_usdc(
         env: Env,
-        admin: Address,
+        caller: Address,
         amount: i128,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(18));
         }
 
@@ -471,7 +471,7 @@ impl SecurityTokenContract {
         let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
 
         // Transfer USDC from contract to admin
-        usdc_token_client.transfer(&env.current_contract_address(), &admin, &amount);
+        usdc_token_client.transfer(&env.current_contract_address(), &caller, &amount);
 
         // Update USDC balance
         token.usdc_balance = token.usdc_balance.checked_sub(amount)
@@ -483,7 +483,7 @@ impl SecurityTokenContract {
         // Emit withdrawal event
         env.events().publish(
             (TOKEN_KEY,),
-            SecurityTokenEvent::UsdcWithdrawn(admin.clone(), amount),
+            SecurityTokenEvent::UsdcWithdrawn(caller.clone(), amount),
         );
 
         Ok(())
@@ -492,16 +492,16 @@ impl SecurityTokenContract {
     // Set transfer restriction flag
     pub fn set_transfer_restriction(
         env: Env,
-        admin: Address,
+        caller: Address,
         restricted: bool,
     ) -> Result<(), Error> {
-        admin.require_auth();
+        caller.require_auth();
 
         // Load token from storage
         let mut token = Self::get_token(&env);
 
         // Check if caller is admin
-        if !Self::is_admin(&token, &admin) {
+        if !Self::is_admin(&token, &caller) {
             return Err(Error::from_contract_error(
                 11
             ));
