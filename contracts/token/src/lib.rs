@@ -20,7 +20,7 @@ pub struct TokenMetadata {
 
 // Define compliance status enum
 #[contracttype]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ComplianceStatus {
     Pending,
     Approved,
