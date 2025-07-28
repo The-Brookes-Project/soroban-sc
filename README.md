@@ -22,6 +22,7 @@ The implementation consists of:
 ## Project Structure
 
 This repository uses the recommended structure for a Soroban project:
+
 ```text
 .
 ├── contracts
@@ -43,6 +44,7 @@ This repository uses the recommended structure for a Soroban project:
 ## Installation
 
 1. Clone the repository:
+
    ```
    git clone git@github.com:The-Brookes-Project/soroban-sc.git
    cd soroban-sc
@@ -58,7 +60,7 @@ This repository uses the recommended structure for a Soroban project:
 ### Deploy the Contract
 
 ```bash
-soroban contract deploy \
+stellar contract deploy \
   --wasm target/wasm32-unknown-unknown/release/verse_token.wasm \
   --source ADMIN \
   --network testnet
@@ -67,8 +69,8 @@ soroban contract deploy \
 ### Initialize the Token
 
 ```bash
-soroban contract invoke \
-  --id CA46SS7OY3XCD4LCERDYWAMZNIA67AINSL3KKHTXRTXJ6GO5P3CI3QXA \
+stellar contract invoke \
+  --id CAC5WE5RFIPZ3V54MDGKDFZTLAD7CKZH36AXYGASBH6IPLLGIO77C7ZE \
   --source-account ADMIN \
   --network testnet \
   -- initialize \
@@ -80,14 +82,14 @@ soroban contract invoke \
   --home-domain "verseprop.com" \
   --admin ADMIN \
   --usdc_price 10000000 \
-  --usdc_token CBIELTK6YBZJU5UP2WWFEIE3USCIHMXQDAMA
+  --usdc_token CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
 ```
 
 ### Manage Compliance
 
 ```bash
 # Set KYC status
-soroban contract invoke \
+stellar contract invoke \
   --id CONTRACT_ID \
   --source-account ADMIN_ACCOUNT \
   --network testnet \
@@ -97,7 +99,7 @@ soroban contract invoke \
   --verified true
 
 # Set compliance status
-soroban contract invoke \
+stellar contract invoke \
   --id CONTRACT_ID \
   --source-account ADMIN_ACCOUNT \
   --network testnet \
@@ -110,7 +112,7 @@ soroban contract invoke \
 ### Transfer Tokens
 
 ```bash
-soroban contract invoke \
+stellar contract invoke \
   --id CONTRACT_ID \
   --source-account SENDER_ACCOUNT \
   --network testnet \
@@ -138,11 +140,11 @@ cargo test
 ```
 
 The test suite includes:
+
 - Token initialization
 - Compliance verification
 - Transfer functionality
 - Clawback operations
-
 
 ## Security Considerations
 

@@ -78,11 +78,8 @@ impl SecurityTokenContract {
         usdc_price: i128,
         usdc_token: Address,
     ) -> SecurityToken {
-        // Get the deployer's address (the contract ID before initialization)
-        let deployer = env.current_contract_address();
-
-        // Require authorization from the deployer
-        deployer.require_auth();
+        // Require authorization from the admin who is initializing
+        admin.require_auth();
 
         // Ensure the contract is only initialized once
         if env.storage().instance().has(&TOKEN_KEY) {
