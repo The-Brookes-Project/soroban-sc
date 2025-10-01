@@ -97,6 +97,12 @@ impl SecurityTokenContract {
             panic!("USDC price must be positive");
         }
 
+        // Validate USDC token address
+        // Prevent setting the contract's own address as USDC token
+        if usdc_token == env.current_contract_address() {
+            panic!("USDC token cannot be the contract itself");
+        }
+
         // Create token metadata
         let metadata = TokenMetadata {
             name,
@@ -401,8 +407,37 @@ impl SecurityTokenContract {
         // Get USDC token client
         let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
 
+        // Verify buyer has sufficient USDC balance BEFORE transfer
+        let buyer_usdc_balance_before = usdc_token_client.balance(&buyer);
+        if buyer_usdc_balance_before < usdc_amount {
+            return Err(Error::from_contract_error(20)); // Insufficient USDC balance
+        }
+
+        // Get contract's initial USDC balance for verification
+        let contract_usdc_balance_before = usdc_token_client.balance(&env.current_contract_address());
+
         // Transfer USDC from buyer to contract
         usdc_token_client.transfer(&buyer, &env.current_contract_address(), &usdc_amount);
+
+        // Verify the transfer actually occurred by checking balances
+        let buyer_usdc_balance_after = usdc_token_client.balance(&buyer);
+        let contract_usdc_balance_after = usdc_token_client.balance(&env.current_contract_address());
+
+        // Verify buyer's balance decreased by the expected amount
+        let expected_buyer_balance = buyer_usdc_balance_before.checked_sub(usdc_amount)
+            .ok_or(Error::from_contract_error(21))?; // USDC transfer verification failed
+        
+        if buyer_usdc_balance_after != expected_buyer_balance {
+            return Err(Error::from_contract_error(21)); // USDC transfer verification failed
+        }
+
+        // Verify contract's balance increased by the expected amount
+        let expected_contract_balance = contract_usdc_balance_before.checked_add(usdc_amount)
+            .ok_or(Error::from_contract_error(21))?; // USDC transfer verification failed
+        
+        if contract_usdc_balance_after != expected_contract_balance {
+            return Err(Error::from_contract_error(21)); // USDC transfer verification failed
+        }
 
         // Update token balances
         let issuer_balance = token.balances.try_get(token.metadata.issuer.clone())
@@ -467,8 +502,37 @@ impl SecurityTokenContract {
         // Get USDC token client
         let usdc_token_client = token::Client::new(&env, &token.metadata.usdc_token);
 
+        // Get initial balances for verification
+        let contract_usdc_balance_before = usdc_token_client.balance(&env.current_contract_address());
+        let admin_usdc_balance_before = usdc_token_client.balance(&caller);
+
+        // Verify contract has sufficient USDC before withdrawal
+        if contract_usdc_balance_before < amount {
+            return Err(Error::from_contract_error(22)); // Insufficient USDC in contract
+        }
+
         // Transfer USDC from contract to admin
         usdc_token_client.transfer(&env.current_contract_address(), &caller, &amount);
+
+        // Verify the transfer actually occurred by checking balances
+        let contract_usdc_balance_after = usdc_token_client.balance(&env.current_contract_address());
+        let admin_usdc_balance_after = usdc_token_client.balance(&caller);
+
+        // Verify contract's balance decreased by the expected amount
+        let expected_contract_balance = contract_usdc_balance_before.checked_sub(amount)
+            .ok_or(Error::from_contract_error(23))?; // USDC withdrawal verification failed
+        
+        if contract_usdc_balance_after != expected_contract_balance {
+            return Err(Error::from_contract_error(23)); // USDC withdrawal verification failed
+        }
+
+        // Verify admin's balance increased by the expected amount
+        let expected_admin_balance = admin_usdc_balance_before.checked_add(amount)
+            .ok_or(Error::from_contract_error(23))?; // USDC withdrawal verification failed
+        
+        if admin_usdc_balance_after != expected_admin_balance {
+            return Err(Error::from_contract_error(23)); // USDC withdrawal verification failed
+        }
 
         // Update USDC balance
         token.usdc_balance = token.usdc_balance.checked_sub(amount)
@@ -629,6 +693,11 @@ impl SecurityTokenContract {
         to: &Address,
         amount: i128,
     ) -> Result<(), Error> {
+        // Prevent self-transfers to avoid balance manipulation
+        if from == to {
+            return Err(Error::from_contract_error(24)); // Self-transfer not allowed
+        }
+
         // Get current balances
         let from_balance = token.balances.try_get(from.clone())
             .map_err(|_| Error::from_contract_error(14))?

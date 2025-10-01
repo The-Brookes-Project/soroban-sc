@@ -789,6 +789,7 @@ fn test_initialize_invalid_parameters() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #24)")]
 fn test_transfer_edge_cases() {
     let env = Env::default();
     env.mock_all_auths();
@@ -835,11 +836,9 @@ fn test_transfer_edge_cases() {
     let initial_balance = client.balance(&user1);
     assert_eq!(initial_balance, 100_000);
 
-    // Test transfer to self (current contract behavior: balance increases)
-    // TODO: This might be a bug in the contract - self-transfers should not change balance
+    // Self-transfers are now blocked (Error #24)
+    // This test now expects a panic with error code 24
     client.transfer(&user1, &user1, &10_000);
-    let final_balance = client.balance(&user1);
-    assert_eq!(final_balance, 110_000); // Current behavior: balance increases on self-transfer
 }
 
 #[test]
