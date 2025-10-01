@@ -4,6 +4,15 @@
 
 The VerseProp Security Token is a regulatory-compliant security token implemented on the Soroban platform. It includes features for KYC verification, compliance status tracking, token transfers with regulatory controls, and direct USDC purchase functionality.
 
+## Storage Architecture
+
+The contract uses a **scalable storage architecture** that separates contract-level and user-level data:
+
+- **Instance Storage**: Metadata, configuration, admin list, USDC balance (small, fixed-size)
+- **Persistent Storage**: User balances, KYC status, compliance status (scales with users)
+
+This architecture ensures the contract can support unlimited users without hitting storage limits. See `STORAGE_ARCHITECTURE.md` for details.
+
 ## Contract Methods
 
 ### Initialization
