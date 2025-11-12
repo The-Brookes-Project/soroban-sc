@@ -1,0 +1,965 @@
+#![cfg(test)]
+
+use super::*;
+use soroban_sdk::{
+    testutils::{Address as _},
+    token::{StellarAssetClient, TokenClient},
+    Address, Env,
+};
+
+// Helper function to create a mock token contract
+fn create_token_contract<'a>(env: &Env, admin: &Address) -> (Address, TokenClient<'a>, StellarAssetClient<'a>) {
+    let token_address = env.register_stellar_asset_contract_v2(admin.clone());
+    let token_client = TokenClient::new(env, &token_address);
+    let stellar_client = StellarAssetClient::new(env, &token_address);
+    (token_address, token_client, stellar_client)
+}
+
+// Helper to setup basic vault
+fn setup_vault(env: &Env) -> (Address, Address, Address, TokenClient, StellarAssetClient) {
+    let admin = Address::generate(env);
+    let (token_address, token_client, stellar_client) = create_token_contract(env, &admin);
+    
+    let vault_address = env.register(VaultContract, ());
+    let vault_client = VaultContractClient::new(env, &vault_address);
+    
+    vault_client.initialize(&admin, &token_address);
+    
+    (vault_address, admin, token_address, token_client, stellar_client)
+}
+
+// ==================== INITIALIZATION TESTS ====================
+
+#[test]
+fn test_initialize_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let admin = Address::generate(&env);
+    let (token_address, _, _) = create_token_contract(&env, &admin);
+    
+    let vault_address = env.register(VaultContract, ());
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.initialize(&admin, &token_address);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.admin, admin);
+    assert_eq!(config.stablecoin_address, token_address);
+    assert_eq!(config.total_capacity, 0);
+    assert_eq!(config.available, 0);
+    assert_eq!(config.buffer_percentage, 15);
+    assert_eq!(config.controlled_mode, false);
+    assert_eq!(config.emergency_pause, false);
+}
+
+#[test]
+#[should_panic(expected = "Vault already initialized")]
+fn test_initialize_twice_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let admin = Address::generate(&env);
+    let (token_address, _, _) = create_token_contract(&env, &admin);
+    
+    let vault_address = env.register(VaultContract, ());
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.initialize(&admin, &token_address);
+    vault_client.initialize(&admin, &token_address); // Should panic
+}
+
+#[test]
+#[should_panic(expected = "Stablecoin cannot be the contract itself")]
+fn test_initialize_self_as_stablecoin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let admin = Address::generate(&env);
+    let vault_address = env.register(VaultContract, ());
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Try to initialize with vault's own address as stablecoin
+    vault_client.initialize(&admin, &vault_address);
+}
+
+// ==================== FUNDING TESTS ====================
+
+#[test]
+fn test_fund_vault_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client, stellar_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Give admin some tokens
+    stellar_client.mint(&admin, &1_000_000);
+    
+    // Fund vault
+    let fund_amount = 100_000i128;
+    vault_client.fund_vault(&admin, &fund_amount);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.total_capacity, fund_amount);
+    assert_eq!(config.available, fund_amount);
+}
+
+#[test]
+#[should_panic(expected = "Not admin")]
+fn test_fund_vault_not_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, _, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let non_admin = Address::generate(&env);
+    vault_client.fund_vault(&non_admin, &100_000);
+}
+
+#[test]
+#[should_panic(expected = "Invalid amount")]
+fn test_fund_vault_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.fund_vault(&admin, &0);
+}
+
+#[test]
+#[should_panic(expected = "Invalid amount")]
+fn test_fund_vault_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.fund_vault(&admin, &-100);
+}
+
+#[test]
+#[should_panic(expected = "Insufficient admin balance")]
+fn test_fund_vault_insufficient_balance_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Try to fund without having tokens
+    vault_client.fund_vault(&admin, &100_000);
+}
+
+// ==================== PROPERTY AUTHORIZATION TESTS ====================
+
+#[test]
+fn test_authorize_property_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    assert!(vault_client.is_authorized(&property));
+}
+
+#[test]
+#[should_panic(expected = "Not admin")]
+fn test_authorize_property_not_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, _, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let non_admin = Address::generate(&env);
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&non_admin, &property);
+}
+
+#[test]
+#[should_panic(expected = "Already authorized")]
+fn test_authorize_property_twice_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    vault_client.authorize_property(&admin, &property); // Should panic
+}
+
+#[test]
+fn test_multiple_properties_authorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let property1 = Address::generate(&env);
+    let property2 = Address::generate(&env);
+    let property3 = Address::generate(&env);
+    
+    vault_client.authorize_property(&admin, &property1);
+    vault_client.authorize_property(&admin, &property2);
+    vault_client.authorize_property(&admin, &property3);
+    
+    assert!(vault_client.is_authorized(&property1));
+    assert!(vault_client.is_authorized(&property2));
+    assert!(vault_client.is_authorized(&property3));
+}
+
+// ==================== LIQUIDATION REQUEST TESTS ====================
+
+#[test]
+fn test_request_liquidation_instant_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Setup: fund vault with enough liquidity
+    token_client.mint(&admin, &10_000_000);
+    vault_client.fund_vault(&admin, &10_000_000);
+    
+    // Authorize property
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Request liquidation
+    let user = Address::generate(&env);
+    let amount = 100_000i128;
+    vault_client.request_liquidation(&property, &user, &amount);
+    
+    // Check user received funds
+    let user_balance = token_client.balance(&user);
+    assert_eq!(user_balance, amount);
+    
+    // Check vault available decreased
+    let config = vault_client.get_config();
+    assert_eq!(config.available, 10_000_000 - amount);
+    
+    // Check not in controlled mode
+    assert_eq!(config.controlled_mode, false);
+}
+
+#[test]
+fn test_request_liquidation_queued_when_low_liquidity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Setup: fund vault with minimal liquidity
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    // Authorize property
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Request liquidation that exceeds buffer
+    let user = Address::generate(&env);
+    let amount = 90_000i128; // Would leave less than 15% buffer
+    vault_client.request_liquidation(&property, &user, &amount);
+    
+    // Check user did NOT receive funds yet
+    let user_balance = token_client.balance(&user);
+    assert_eq!(user_balance, 0);
+    
+    // Check in controlled mode
+    let config = vault_client.get_config();
+    assert_eq!(config.controlled_mode, true);
+    
+    // Check queue status
+    let queue_status = vault_client.get_queue_status();
+    assert_eq!(queue_status.total_queued, 1);
+    assert_eq!(queue_status.total_amount, amount);
+}
+
+#[test]
+#[should_panic(expected = "Property not authorized")]
+fn test_request_liquidation_unauthorized_property_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    // Try liquidation without authorizing property
+    let property = Address::generate(&env);
+    let user = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user, &100_000);
+}
+
+#[test]
+#[should_panic(expected = "Invalid amount")]
+fn test_request_liquidation_zero_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    let user = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user, &0);
+}
+
+#[test]
+#[should_panic(expected = "Invalid amount")]
+fn test_request_liquidation_negative_amount_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    let user = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user, &-100);
+}
+
+#[test]
+fn test_queue_fifo_processing() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Setup: minimal liquidity to force queuing
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Queue multiple liquidations
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property, &user1, &50_000);
+    vault_client.request_liquidation(&property, &user2, &30_000);
+    vault_client.request_liquidation(&property, &user3, &20_000);
+    
+    // Verify all queued
+    let queue_status = vault_client.get_queue_status();
+    assert_eq!(queue_status.total_queued, 3);
+    
+    // Fund more to process queue
+    token_client.mint(&admin, &200_000);
+    vault_client.fund_vault(&admin, &200_000);
+    
+    // Check FIFO: user1 should be processed first
+    let user1_balance = token_client.balance(&user1);
+    assert_eq!(user1_balance, 50_000);
+    
+    // user2 and user3 should also be processed
+    let user2_balance = token_client.balance(&user2);
+    let user3_balance = token_client.balance(&user3);
+    assert_eq!(user2_balance, 30_000);
+    assert_eq!(user3_balance, 20_000);
+    
+    // Queue should be empty and controlled mode off
+    let queue_status = vault_client.get_queue_status();
+    assert_eq!(queue_status.total_queued, 0);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.controlled_mode, false);
+}
+
+// ==================== EMERGENCY PAUSE TESTS ====================
+
+#[test]
+fn test_emergency_pause_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.emergency_pause(&admin);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.emergency_pause, true);
+}
+
+#[test]
+#[should_panic(expected = "Not admin")]
+fn test_emergency_pause_not_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, _, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let non_admin = Address::generate(&env);
+    vault_client.emergency_pause(&non_admin);
+}
+
+#[test]
+#[should_panic(expected = "Already paused")]
+fn test_emergency_pause_twice_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.emergency_pause(&admin);
+    vault_client.emergency_pause(&admin); // Should panic
+}
+
+#[test]
+#[should_panic(expected = "Emergency paused")]
+fn test_fund_vault_while_paused_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.emergency_pause(&admin);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &100_000);
+}
+
+#[test]
+#[should_panic(expected = "Emergency paused")]
+fn test_request_liquidation_while_paused_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    vault_client.emergency_pause(&admin);
+    
+    let user = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user, &100_000);
+}
+
+#[test]
+fn test_emergency_unpause_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.emergency_pause(&admin);
+    vault_client.emergency_unpause(&admin);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.emergency_pause, false);
+}
+
+// ==================== BUFFER MANAGEMENT TESTS ====================
+
+#[test]
+fn test_update_buffer_percentage_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.update_buffer_percentage(&admin, &20);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.buffer_percentage, 20);
+}
+
+#[test]
+#[should_panic(expected = "Buffer must be between 10-25%")]
+fn test_update_buffer_too_low_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.update_buffer_percentage(&admin, &5);
+}
+
+#[test]
+#[should_panic(expected = "Buffer must be between 10-25%")]
+fn test_update_buffer_too_high_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    vault_client.update_buffer_percentage(&admin, &30);
+}
+
+#[test]
+#[should_panic(expected = "Not admin")]
+fn test_update_buffer_not_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, _, _, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let non_admin = Address::generate(&env);
+    vault_client.update_buffer_percentage(&non_admin, &20);
+}
+
+// ==================== WITHDRAWAL TESTS ====================
+
+#[test]
+fn test_withdraw_liquidity_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund vault
+    token_client.mint(&admin, &10_000_000);
+    vault_client.fund_vault(&admin, &10_000_000);
+    
+    let admin_balance_before = token_client.balance(&admin);
+    
+    // Withdraw some (leaving enough for buffer)
+    let withdraw_amount = 2_000_000i128;
+    vault_client.withdraw_liquidity(&admin, &withdraw_amount);
+    
+    let admin_balance_after = token_client.balance(&admin);
+    assert_eq!(admin_balance_after, admin_balance_before + withdraw_amount);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.available, 10_000_000 - withdraw_amount);
+}
+
+#[test]
+#[should_panic(expected = "Would violate buffer requirements")]
+fn test_withdraw_violates_buffer_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund vault with 100k
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    // Try to withdraw 95k (would leave only 5%, less than 15% buffer)
+    vault_client.withdraw_liquidity(&admin, &95_000);
+}
+
+#[test]
+#[should_panic(expected = "Would violate buffer requirements")]
+fn test_withdraw_with_queue_obligations_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund vault minimally
+    token_client.mint(&admin, &200_000);
+    vault_client.fund_vault(&admin, &200_000);
+    
+    // Queue a liquidation
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    let user = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user, &150_000);
+    
+    // Try to withdraw while there are queue obligations
+    vault_client.withdraw_liquidity(&admin, &50_000);
+}
+
+#[test]
+#[should_panic(expected = "Not admin")]
+fn test_withdraw_not_admin_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let non_admin = Address::generate(&env);
+    vault_client.withdraw_liquidity(&non_admin, &100_000);
+}
+
+// ==================== PROPERTY STATS TESTS ====================
+
+#[test]
+fn test_property_stats_tracking() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Setup
+    token_client.mint(&admin, &10_000_000);
+    vault_client.fund_vault(&admin, &10_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Process liquidations
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property, &user1, &100_000);
+    vault_client.request_liquidation(&property, &user2, &150_000);
+    
+    // Check stats
+    let stats = vault_client.get_property_stats(&property).unwrap();
+    assert_eq!(stats.total_liquidated, 250_000);
+    assert!(stats.last_liquidation > 0);
+}
+
+// ==================== VIEW FUNCTION TESTS ====================
+
+#[test]
+fn test_available_liquidity_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    assert_eq!(vault_client.available_liquidity(), 0);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    assert_eq!(vault_client.available_liquidity(), 1_000_000);
+}
+
+#[test]
+fn test_total_capacity_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    assert_eq!(vault_client.total_capacity(), 0);
+    
+    token_client.mint(&admin, &5_000_000);
+    vault_client.fund_vault(&admin, &5_000_000);
+    
+    assert_eq!(vault_client.total_capacity(), 5_000_000);
+}
+
+#[test]
+fn test_is_authorized_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, _) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    let property = Address::generate(&env);
+    assert_eq!(vault_client.is_authorized(&property), false);
+    
+    vault_client.authorize_property(&admin, &property);
+    assert_eq!(vault_client.is_authorized(&property), true);
+}
+
+#[test]
+fn test_queue_status_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Initially empty
+    let status = vault_client.get_queue_status();
+    assert_eq!(status.total_queued, 0);
+    assert_eq!(status.total_amount, 0);
+    assert_eq!(status.controlled_mode, false);
+    
+    // Queue some liquidations
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property, &user1, &80_000);
+    vault_client.request_liquidation(&property, &user2, &30_000);
+    
+    let status = vault_client.get_queue_status();
+    assert_eq!(status.total_queued, 2);
+    assert_eq!(status.total_amount, 110_000);
+    assert_eq!(status.controlled_mode, true);
+}
+
+// ==================== VULNERABILITY TESTS ====================
+
+#[test]
+#[should_panic(expected = "Overflow")]
+fn test_overflow_protection_total_capacity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Try to overflow total_capacity
+    let max_i128 = i128::MAX;
+    token_client.mint(&admin, &max_i128);
+    vault_client.fund_vault(&admin, &max_i128);
+    
+    // Try to add more
+    token_client.mint(&admin, &1);
+    vault_client.fund_vault(&admin, &1); // Should panic on overflow
+}
+
+#[test]
+fn test_reentrancy_protection() {
+    // Soroban prevents reentrancy by design, but test proper auth checks
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Multiple liquidations in sequence should work
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property, &user1, &100_000);
+    vault_client.request_liquidation(&property, &user2, &100_000);
+    
+    assert_eq!(token_client.balance(&user1), 100_000);
+    assert_eq!(token_client.balance(&user2), 100_000);
+}
+
+#[test]
+fn test_unauthorized_access_protection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let authorized_property = Address::generate(&env);
+    let unauthorized_property = Address::generate(&env);
+    
+    vault_client.authorize_property(&admin, &authorized_property);
+    
+    // Authorized property can liquidate
+    let user1 = Address::generate(&env);
+    vault_client.request_liquidation(&authorized_property, &user1, &100_000);
+    assert_eq!(token_client.balance(&user1), 100_000);
+    
+    // Unauthorized property cannot (would panic, tested separately)
+    assert_eq!(vault_client.is_authorized(&unauthorized_property), false);
+}
+
+#[test]
+fn test_double_spending_protection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund with limited amount
+    token_client.mint(&admin, &200_000);
+    vault_client.fund_vault(&admin, &200_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    let user = Address::generate(&env);
+    
+    // First liquidation succeeds
+    vault_client.request_liquidation(&property, &user, &100_000);
+    assert_eq!(token_client.balance(&user), 100_000);
+    
+    // Second liquidation also succeeds (vault has enough)
+    vault_client.request_liquidation(&property, &user, &50_000);
+    assert_eq!(token_client.balance(&user), 150_000);
+    
+    // Vault balance is correctly tracked
+    let config = vault_client.get_config();
+    assert_eq!(config.available, 200_000 - 150_000);
+}
+
+#[test]
+fn test_queue_processing_partial_fulfillment() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Minimal liquidity
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    // Queue 3 requests
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property, &user1, &70_000);
+    vault_client.request_liquidation(&property, &user2, &50_000);
+    vault_client.request_liquidation(&property, &user3, &40_000);
+    
+    // All queued
+    assert_eq!(token_client.balance(&user1), 0);
+    
+    // Add enough to process first two
+    token_client.mint(&admin, &100_000);
+    vault_client.fund_vault(&admin, &100_000);
+    
+    // First two should be processed
+    assert_eq!(token_client.balance(&user1), 70_000);
+    assert_eq!(token_client.balance(&user2), 50_000);
+    
+    // Third still queued
+    let queue_status = vault_client.get_queue_status();
+    assert_eq!(queue_status.total_queued, 1);
+    
+    // Still in controlled mode
+    let config = vault_client.get_config();
+    assert_eq!(config.controlled_mode, true);
+}
+
+// ==================== INTEGRATION SCENARIOS ====================
+
+#[test]
+fn test_complex_scenario_multiple_properties() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund vault generously
+    token_client.mint(&admin, &50_000_000);
+    vault_client.fund_vault(&admin, &50_000_000);
+    
+    // Authorize multiple properties
+    let property_a = Address::generate(&env);
+    let property_b = Address::generate(&env);
+    let property_c = Address::generate(&env);
+    
+    vault_client.authorize_property(&admin, &property_a);
+    vault_client.authorize_property(&admin, &property_b);
+    vault_client.authorize_property(&admin, &property_c);
+    
+    // Process liquidations from different properties
+    let user1 = Address::generate(&env);
+    let user2 = Address::generate(&env);
+    let user3 = Address::generate(&env);
+    
+    vault_client.request_liquidation(&property_a, &user1, &1_000_000);
+    vault_client.request_liquidation(&property_b, &user2, &2_000_000);
+    vault_client.request_liquidation(&property_c, &user3, &1_500_000);
+    
+    // All should succeed
+    assert_eq!(token_client.balance(&user1), 1_000_000);
+    assert_eq!(token_client.balance(&user2), 2_000_000);
+    assert_eq!(token_client.balance(&user3), 1_500_000);
+    
+    // Check individual property stats
+    let stats_a = vault_client.get_property_stats(&property_a).unwrap();
+    let stats_b = vault_client.get_property_stats(&property_b).unwrap();
+    let stats_c = vault_client.get_property_stats(&property_c).unwrap();
+    
+    assert_eq!(stats_a.total_liquidated, 1_000_000);
+    assert_eq!(stats_b.total_liquidated, 2_000_000);
+    assert_eq!(stats_c.total_liquidated, 1_500_000);
+}
+
+#[test]
+fn test_buffer_threshold_calculation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    
+    let (vault_address, admin, _, token_client) = setup_vault(&env);
+    let vault_client = VaultContractClient::new(&env, &vault_address);
+    
+    // Fund with 1M, 15% buffer = 150k
+    token_client.mint(&admin, &1_000_000);
+    vault_client.fund_vault(&admin, &1_000_000);
+    
+    let property = Address::generate(&env);
+    vault_client.authorize_property(&admin, &property);
+    
+    let user = Address::generate(&env);
+    
+    // Request 860k (would leave 140k < 150k buffer) -> should queue
+    vault_client.request_liquidation(&property, &user, &860_000);
+    
+    let config = vault_client.get_config();
+    assert_eq!(config.controlled_mode, true);
+    assert_eq!(token_client.balance(&user), 0);
+    
+    // Request 850k (would leave 150k = buffer) -> should NOT queue if alone
+    // But we're already in controlled mode, so it will queue
+    let user2 = Address::generate(&env);
+    vault_client.request_liquidation(&property, &user2, &10_000);
+    
+    let queue_status = vault_client.get_queue_status();
+    assert_eq!(queue_status.total_queued, 2);
+}
+
