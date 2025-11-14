@@ -42,6 +42,7 @@ pub struct LiquidationRequest {
     pub user: Address,
     pub amount: i128,
     pub timestamp: u64,
+    pub estimated_fulfill_date: u64,
 }
 
 // Queue status for view function
@@ -53,6 +54,7 @@ pub struct QueueStatus {
     pub controlled_mode: bool,
     pub head_index: u64,
     pub tail_index: u64,
+    pub estimated_clear_time: u64,
 }
 
 // Property stats
@@ -62,6 +64,8 @@ pub struct PropertyVaultStats {
     pub property_contract: Address,
     pub total_liquidated: i128,
     pub last_liquidation: u64,
+    pub active_users: u32,
+    pub cash_flow_monthly: i128,
 }
 
 // Storage key types for user-specific data
@@ -244,6 +248,8 @@ impl VaultContract {
             property_contract: property_contract.clone(),
             total_liquidated: 0,
             last_liquidation: 0,
+            active_users: 0,
+            cash_flow_monthly: 0,
         };
         env.storage().persistent().set(
             &DataKey::PropertyStats(property_contract.clone()),
@@ -500,6 +506,8 @@ impl VaultContract {
                     property_contract: property_contract.clone(),
                     total_liquidated: 0,
                     last_liquidation: 0,
+                    active_users: 0,
+                    cash_flow_monthly: 0,
                 });
             
             stats.total_liquidated = stats.total_liquidated.checked_add(amount)
@@ -535,6 +543,9 @@ impl VaultContract {
             
             let request_id = tail_index;
 
+            // Calculate estimated fulfillment date
+            let estimated_fulfill_date = Self::estimate_fulfillment(&env, amount);
+
             // Create liquidation request
             let request = LiquidationRequest {
                 request_id,
@@ -542,6 +553,7 @@ impl VaultContract {
                 user: user.clone(),
                 amount,
                 timestamp: env.ledger().timestamp(),
+                estimated_fulfill_date,
             };
 
             // Add to queue
@@ -633,12 +645,24 @@ impl VaultContract {
             }
         }
 
+        // Calculate estimated clear time
+        let monthly_cash_flow = Self::calculate_expected_cash_flow(&env);
+        let estimated_clear_time = if total_amount == 0 || monthly_cash_flow <= 0 {
+            env.ledger().timestamp()
+        } else {
+            let months_needed = total_amount.checked_div(monthly_cash_flow).unwrap_or(1);
+            let months_capped = if months_needed > 12 { 12 } else { months_needed };
+            let seconds_to_add = months_capped.checked_mul(2_592_000).unwrap_or(2_592_000);
+            env.ledger().timestamp().checked_add(seconds_to_add as u64).unwrap_or(0)
+        };
+
         QueueStatus {
             total_queued,
             total_amount,
             controlled_mode: config.controlled_mode,
             head_index,
             tail_index,
+            estimated_clear_time,
         }
     }
 
@@ -677,6 +701,47 @@ impl VaultContract {
             }
         }
         total
+    }
+
+    /// Calculate expected monthly cash flow from all properties
+    fn calculate_expected_cash_flow(env: &Env) -> i128 {
+        let authorized: Vec<Address> = env.storage()
+            .instance()
+            .get(&AUTH_PROPS)
+            .unwrap_or(Vec::new(env));
+        
+        let mut total_cash_flow = 0i128;
+        for property in authorized.iter() {
+            if let Some(stats) = env.storage()
+                .persistent()
+                .get::<DataKey, PropertyVaultStats>(&DataKey::PropertyStats(property))
+            {
+                total_cash_flow = total_cash_flow.checked_add(stats.cash_flow_monthly)
+                    .unwrap_or(total_cash_flow);
+            }
+        }
+        total_cash_flow
+    }
+
+    /// Estimate fulfillment date for a liquidation request
+    fn estimate_fulfillment(env: &Env, amount: i128) -> u64 {
+        let monthly_cash_flow = Self::calculate_expected_cash_flow(env);
+        
+        // If no cash flow, estimate far in the future (90 days)
+        if monthly_cash_flow <= 0 {
+            return env.ledger().timestamp().checked_add(7_776_000).unwrap_or(0); // 90 days
+        }
+        
+        // Calculate months needed to accumulate this amount
+        let months_needed = amount.checked_div(monthly_cash_flow).unwrap_or(1);
+        
+        // Cap at reasonable maximum (12 months)
+        let months_capped = if months_needed > 12 { 12 } else { months_needed };
+        
+        // Calculate estimated date (months * 30 days in seconds)
+        let seconds_to_add = months_capped.checked_mul(2_592_000).unwrap_or(2_592_000);
+        
+        env.ledger().timestamp().checked_add(seconds_to_add as u64).unwrap_or(0)
     }
 
     /// Attempt to process queued liquidations
