@@ -26,11 +26,11 @@ This repository uses the recommended structure for a Soroban project:
 ```text
 .
 ├── contracts
-│   └── token
-│       ├── src
-│       │   ├── lib.rs
-│       │   └── test.rs
-│       └── Cargo.toml
+│   ├── kyc
+│   ├── property
+│   └── vault
+├── scripts
+│   └── deploy.sh
 ├── Cargo.toml
 └── README.md
 ```
@@ -39,97 +39,100 @@ This repository uses the recommended structure for a Soroban project:
 
 - Rust 1.70+
 - Soroban CLI v22.0.0+
-- Stellar account for deployment
+- Stellar account for deployment (configured in your local environment)
 
 ## Installation
 
 1. Clone the repository:
 
-   ```
+   ```bash
    git clone git@github.com:The-Brookes-Project/soroban-sc.git
    cd soroban-sc
    ```
 
-2. Build the contract:
-   ```
-   soroban contract build
+2. Build the contracts:
+   ```bash
+   stellar contract build
    ```
 
 ## Usage
 
-### Deploy the Contract
+### Deploy the Contracts
 
+We provide a convenience script to build and deploy all contracts (`kyc`, `vault`, `property`).
+
+**Deploy to Testnet (Default):**
 ```bash
-stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/verse_token.wasm \
-  --source ADMIN \
-  --network testnet
+./scripts/deploy.sh
 ```
 
-### Initialize the Token
+**Deploy to Mainnet:**
+```bash
+./scripts/deploy.sh mainnet
+```
+
+The script will output the Contract IDs for `verse_kyc`, `verse_vault`, and `verse_property`. It also saves them to a file named `.contracts_<network>` (e.g., `.contracts_testnet`).
+
+### Initialize the Property Contract
+
+After deployment, you must initialize the property contract. You will need the Contract IDs from the deployment step and a Stablecoin address (e.g., USDC).
 
 ```bash
+# Load the contract IDs (optional, or just copy-paste them)
+source .contracts_testnet
+
+# Initialize
 stellar contract invoke \
-  --id CAC5WE5RFIPZ3V54MDGKDFZTLAD7CKZH36AXYGASBH6IPLLGIO77C7ZE \
+  --id $PROPERTY_ID \
   --source-account ADMIN \
   --network testnet \
   -- initialize \
+  --admin ADMIN \
   --name "Verseprop Token" \
   --symbol "VSP" \
   --decimals 6 \
-  --total-supply 100000000000 \
-  --issuer ISSUER \
-  --home-domain "verseprop.com" \
-  --admin ADMIN \
-  --usdc_price 10000000 \
-  --usdc_token CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+  --total_supply 100000000000 \
+  --token_price 10000000 \
+  --vault_address $VAULT_ID \
+  --kyc_address $KYC_ID \
+  --stablecoin_address USDC_CONTRACT_ADDRESS
 ```
 
-### Manage Compliance
+> **Note:** Replace `USDC_CONTRACT_ADDRESS` with the actual address of the stablecoin you wish to use (e.g., a mock USDC on testnet).
 
-```bash
-# Set KYC status
-stellar contract invoke \
-  --id CONTRACT_ID \
-  --source-account ADMIN_ACCOUNT \
-  --network testnet \
-  -- set_kyc_status \
-  --admin ADMIN_ACCOUNT \
-  --address USER_ACCOUNT \
-  --verified true
+### Manage Compliance (KYC)
 
-# Set compliance status
-stellar contract invoke \
-  --id CONTRACT_ID \
-  --source-account ADMIN_ACCOUNT \
-  --network testnet \
-  -- set_compliance_status \
-  --admin ADMIN_ACCOUNT \
-  --address USER_ACCOUNT \
-  --status Approved
-```
-
-### Transfer Tokens
+To approve a user via the KYC contract:
 
 ```bash
 stellar contract invoke \
-  --id CONTRACT_ID \
-  --source-account SENDER_ACCOUNT \
+  --id $KYC_ID \
+  --source-account ADMIN \
   --network testnet \
-  -- transfer \
-  --from SENDER_ACCOUNT \
-  --to RECIPIENT_ACCOUNT \
-  --amount 1000000
+  -- set_status \
+  --user USER_ACCOUNT \
+  --status 1
+```
+*(Note: Check the KYC contract source for exact enum values for status)*
+
+### Purchase Tokens
+
+Users can purchase tokens if they are KYC approved and have sufficient stablecoin balance.
+
+```bash
+stellar contract invoke \
+  --id $PROPERTY_ID \
+  --source-account USER \
+  --network testnet \
+  -- purchase_tokens \
+  --buyer USER \
+  --token_amount 1000000 \
+  --enable_compounding true
 ```
 
 ## Configuration Options
 
-The contract supports several configuration options:
-
-- **Authorization Required**: Require issuer approval for accounts to hold tokens
-- **Authorization Revocable**: Allow issuer to revoke authorization
-- **Clawback Enabled**: Enable regulatory clawback functionality
-- **Transfer Restrictions**: Restrict transfers to comply with regulations
+The contract supports several configuration options managed via the `update_roi_config` function.
 
 ## Testing
 
@@ -139,13 +142,6 @@ Run the tests with:
 cargo test
 ```
 
-The test suite includes:
-
-- Token initialization
-- Compliance verification
-- Transfer functionality
-- Clawback operations
-
 ## Security Considerations
 
-This implementation includes security controls but is yet to be conducted an audit
+This implementation includes security controls but is yet to be conducted an audit.
