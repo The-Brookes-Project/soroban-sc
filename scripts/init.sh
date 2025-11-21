@@ -41,6 +41,28 @@ stellar contract invoke \
     -- initialize \
     --admin $SOURCE
 
+# 3a. Set KYC Status for ADMIN
+echo -e "${GREEN}Setting KYC verified status for ADMIN...${NC}"
+stellar contract invoke \
+    --id $KYC_ID \
+    --source $SOURCE \
+    --network $NETWORK \
+    -- set_kyc_status \
+    --admin $SOURCE \
+    --user $SOURCE \
+    --verified true
+
+# 3b. Set Compliance Status for ADMIN
+echo -e "${GREEN}Setting compliance status to Approved for ADMIN...${NC}"
+stellar contract invoke \
+    --id $KYC_ID \
+    --source $SOURCE \
+    --network $NETWORK \
+    -- set_compliance_status \
+    --admin $SOURCE \
+    --user $SOURCE \
+    --status Approved
+
 # 4. Initialize Vault
 echo -e "${GREEN}Initializing Vault Contract ($VAULT_ID)...${NC}"
 stellar contract invoke \
