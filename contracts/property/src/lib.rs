@@ -228,20 +228,27 @@ impl PropertyContract {
         let kyc_client = KycContractClient::new(&env, &metadata.kyc_address);
         kyc_client.check_compliance(&buyer);
 
-        // Calculate cost
-        let cost = token_amount.checked_mul(metadata.token_price)
-            .expect("Overflow in cost calculation");
+        // Calculate cost: (token_amount * token_price) / 10^decimals
+        // Both token_amount and token_price are already scaled by decimals,
+        // so we need to divide by the decimal factor once
+        let decimal_factor: i128 = 10_i128.pow(metadata.decimals as u32);
+        let cost = token_amount
+            .checked_mul(metadata.token_price)
+            .expect("Overflow in cost calculation")
+            .checked_div(decimal_factor)
+            .expect("Division error in cost calculation");
 
-        // Transfer USDC from buyer to contract
+        // Transfer USDC from buyer to contract using approval
         let token_client = token::Client::new(&env, &metadata.stablecoin_address);
-        
-        // Verify buyer has sufficient balance
-        let buyer_balance = token_client.balance(&buyer);
-        if buyer_balance < cost {
-            panic!("Insufficient USDC balance");
-        }
 
-        token_client.transfer(&buyer, &env.current_contract_address(), &cost);
+        // Use transfer_from to pull USDC using the approval
+        // This will fail if buyer has insufficient balance or insufficient allowance
+        token_client.transfer_from(
+            &env.current_contract_address(),  // spender (this contract)
+            &buyer,                             // from (the buyer)
+            &env.current_contract_address(),  // to (this contract)
+            &cost                               // amount
+        );
 
         // Create user position
         let position = UserPosition {
@@ -689,5 +696,4 @@ pub use vault_contract::Client as VaultContractClient;
 
 mod test;
 // Integration tests require proper WASM builds
-// mod integration_test;
-
+mod integration_test;
