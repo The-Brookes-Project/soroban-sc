@@ -137,13 +137,13 @@ fn test_full_purchase_rollover_liquidation_flow() {
     
     // Preview yield with loyalty bonus
     let yield_preview = property_client.preview_yield(&user);
-    // Second epoch with loyalty tier 1 (25 bps), principal = 10,082 USDC:
-    // Base: 10,082 * 66 / 10,000 = 66 USDC (integer)
-    // Compounding: 10,082 * 16 / 10,000 = 16 USDC (integer)
-    // Loyalty: 10,082 * (25/12) / 10,000 = 10,082 * 2 / 10,000 = 2 USDC (integer)
-    // Total: 84 USDC
+    // Second epoch with loyalty tier 1 (25 bps), principal = 10,082 USDC (100820000000):
+    // Base: 100820000000 * 66 / 10,000 = 665412000
+    // Compounding: 100820000000 * 16 / 10,000 = 161312000
+    // Loyalty: 100820000000 * 2 / 10,000 = 20164000
+    // Total: 846888000 (84.6888 USDC)
     assert!(yield_preview.loyalty_bonus > 0);
-    assert_eq!(yield_preview.total_yield, 84_0000000);
+    assert_eq!(yield_preview.total_yield, 846888000);
     
     // 5. USER LIQUIDATES
     let user_balance_before = usdc_client.balance(&user);
@@ -156,9 +156,9 @@ fn test_full_purchase_rollover_liquidation_flow() {
     let user_balance_after = usdc_client.balance(&user);
     assert!(user_balance_after > user_balance_before);
     // User should have received principal + yield
-    // Epoch 1: 10,000 + 82 = 10,082
-    // Epoch 2: 10,082 + 84 = 10,166 USDC
-    assert_eq!(user_balance_after, 10_166_0000000);
+    // Epoch 1: 10,000 + 82 = 10,082 USDC (100820000000)
+    // Epoch 2: 10,082 + 84.6888 = 10,166.6888 USDC (101666888000)
+    assert_eq!(user_balance_after, 101666888000);
 }
 
 #[test]
