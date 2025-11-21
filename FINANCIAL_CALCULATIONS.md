@@ -1,13 +1,5 @@
 # VerseToken Platform: Financial Calculations & Formulas
 
-**Document Purpose:** This document details all financial calculations, formulas, and logic used in the VerseToken real estate tokenization platform for financial validation and audit purposes.
-
-**Target Audience:** Financial analysts, accountants, and auditors (non-technical)
-
-**Last Updated:** November 21, 2025
-
----
-
 ## Table of Contents
 
 1. [System Overview](#system-overview)
@@ -878,32 +870,3 @@ available = available + amount;  // Could silently overflow
 **Rollover:** Extending position for another epoch, capturing earned yield and advancing loyalty tier.
 
 **Yield:** The return on investment earned during an epoch, paid in USDC.
-
----
-
-## Document Revision History
-
-| Date       | Version | Changes                                                |
-| ---------- | ------- | ------------------------------------------------------ |
-| 2025-11-21 | 1.0     | Initial documentation with all formulas and test cases |
-
----
-
-## Verification Checklist
-
-For financial auditors validating this system:
-
-- [ ] Verify all yield formulas calculate correctly (see Test Cases section)
-- [ ] Confirm buffer calculations maintain required reserves
-- [ ] Validate queue processing maintains FIFO order
-- [ ] Check compounding math produces accurate principal growth
-- [ ] Verify loyalty bonuses scale correctly with tiers
-- [ ] Confirm overflow protection prevents arithmetic errors
-- [ ] Validate liquidation payouts include all earned yield
-- [ ] Check emergency pause prevents unauthorized fund movement
-- [ ] Verify property authorization prevents unauthorized access
-- [ ] Confirm statistics tracking accurately reflects all transactions
-
----
-
-**For Questions or Clarifications:** Please contact the development team with reference to specific test cases or formula sections in this document.
