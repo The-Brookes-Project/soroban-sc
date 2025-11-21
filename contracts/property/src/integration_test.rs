@@ -297,3 +297,4 @@ fn test_loyalty_tier_progression() {
     assert_eq!(position.loyalty_tier, 4);
 }
 
+

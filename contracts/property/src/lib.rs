@@ -678,12 +678,12 @@ impl PropertyContract {
 
 // Import client types for cross-contract calls
 mod kyc_contract {
-    soroban_sdk::contractimport!(file = "../../target/wasm32-unknown-unknown/release/verse_kyc.wasm");
+    soroban_sdk::contractimport!(file = "../../target/wasm32v1-none/release/verse_kyc.wasm");
 }
 pub use kyc_contract::Client as KycContractClient;
 
 mod vault_contract {
-    soroban_sdk::contractimport!(file = "../../target/wasm32-unknown-unknown/release/verse_vault.wasm");
+    soroban_sdk::contractimport!(file = "../../target/wasm32v1-none/release/verse_vault.wasm");
 }
 pub use vault_contract::Client as VaultContractClient;
 
