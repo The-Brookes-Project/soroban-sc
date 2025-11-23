@@ -63,6 +63,7 @@ pub enum SecurityTokenEvent {
     Purchase(Address, i128, i128), // buyer, token_amount, usdc_amount
     UsdcWithdrawn(Address, i128), // admin, amount
     AdminAdded(Address, Address), // admin, new_admin
+    AdminRemoved(Address, Address), // issuer, removed_admin
     TransferRestrictionChanged(bool), // restricted status
 }
 
@@ -292,8 +293,8 @@ impl SecurityTokenContract {
     pub fn add_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), Error> {
         caller.require_auth();
 
-        // Check if caller is admin
-        if !Self::is_admin(&env, &caller) {
+        // Check if caller is issuer
+        if !Self::is_issuer(&env, &caller) {
             return Err(Error::from_contract_error(8));
         }
 
@@ -317,6 +318,52 @@ impl SecurityTokenContract {
         env.events().publish(
             (symbol_short!("admin"),),
             SecurityTokenEvent::AdminAdded(caller.clone(), new_admin),
+        );
+
+        Ok(())
+    }
+
+    // Remove an admin from the token
+    pub fn remove_admin(env: Env, caller: Address, admin_to_remove: Address) -> Result<(), Error> {
+        caller.require_auth();
+
+        // Check if caller is issuer
+        if !Self::is_issuer(&env, &caller) {
+            return Err(Error::from_contract_error(25)); // Only issuer can remove admins
+        }
+
+        // Check if trying to remove the issuer
+        if Self::is_issuer(&env, &admin_to_remove) {
+            return Err(Error::from_contract_error(26)); // Cannot remove issuer
+        }
+
+        // Check if the address is actually an admin
+        if !Self::is_admin(&env, &admin_to_remove) {
+            return Err(Error::from_contract_error(27)); // Address is not an admin
+        }
+
+        // Get current admin list from INSTANCE storage
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&ADMINS_KEY)
+            .unwrap();
+
+        // Remove the admin from the list
+        let mut new_admins = Vec::new(&env);
+        for admin in admins.iter() {
+            if &admin != &admin_to_remove {
+                new_admins.push_back(admin);
+            }
+        }
+
+        // Update storage with new admin list
+        env.storage().instance().set(&ADMINS_KEY, &new_admins);
+
+        // Emit admin removed event
+        env.events().publish(
+            (symbol_short!("adminrem"),),
+            SecurityTokenEvent::AdminRemoved(caller.clone(), admin_to_remove),
         );
 
         Ok(())
@@ -600,6 +647,12 @@ impl SecurityTokenContract {
         metadata.usdc_price
     }
 
+    // View function to get the issuer address
+    pub fn get_issuer(env: Env) -> Address {
+        let metadata = Self::get_metadata(&env);
+        metadata.issuer
+    }
+
     // Internal helper functions
 
     // Helper to get config from storage
@@ -624,6 +677,12 @@ impl SecurityTokenContract {
             }
         }
         false
+    }
+
+    // Helper to check if address is the issuer
+    fn is_issuer(env: &Env, address: &Address) -> bool {
+        let metadata = Self::get_metadata(env);
+        &metadata.issuer == address
     }
 
     // Helper to check compliance requirements

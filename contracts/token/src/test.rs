@@ -479,8 +479,8 @@ fn test_add_admin() {
         )
     });
 
-    // Add new admin
-    client.add_admin(&admin, &new_admin);
+    // Add new admin (only issuer can add admins)
+    client.add_admin(&issuer, &new_admin);
 
     // Verify new admin can perform admin functions
     client.set_kyc_status(&new_admin, &issuer, &true);
@@ -495,7 +495,6 @@ fn test_add_admin_unauthorized() {
     let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
-    let non_admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
 
     // Setup test USDC token contract
@@ -520,8 +519,8 @@ fn test_add_admin_unauthorized() {
         )
     });
 
-    // Non-admin tries to add admin should fail
-    client.add_admin(&non_admin, &new_admin);
+    // Non-issuer admin tries to add admin should fail
+    client.add_admin(&admin, &new_admin);
 }
 
 #[test]
@@ -555,8 +554,198 @@ fn test_add_admin_duplicate() {
         )
     });
 
-    // Try to add admin again should fail
-    client.add_admin(&admin, &admin);
+    // Try to add admin again should fail (issuer trying to add existing admin)
+    client.add_admin(&issuer, &admin);
+}
+
+#[test]
+fn test_remove_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let another_admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Add another admin
+    client.add_admin(&issuer, &another_admin);
+
+    // Remove the admin
+    client.remove_admin(&issuer, &admin);
+
+    // Verify issuer is still admin
+    assert_eq!(client.get_issuer(), issuer);
+}
+
+#[test]
+#[should_panic]
+fn test_remove_admin_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let another_admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Add another admin
+    client.add_admin(&issuer, &another_admin);
+
+    // Non-issuer admin tries to remove another admin - should fail
+    client.remove_admin(&admin, &another_admin);
+}
+
+#[test]
+#[should_panic]
+fn test_remove_admin_issuer_protected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Try to remove issuer - should fail
+    client.remove_admin(&issuer, &issuer);
+}
+
+#[test]
+#[should_panic]
+fn test_remove_admin_not_an_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let non_admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Try to remove non-admin - should fail
+    client.remove_admin(&issuer, &non_admin);
+}
+
+#[test]
+fn test_remove_last_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Remove the admin (only issuer remains)
+    client.remove_admin(&issuer, &admin);
+
+    // Verify issuer is still admin and can perform admin functions
+    assert_eq!(client.get_issuer(), issuer);
+    let new_admin = Address::generate(&env);
+    client.add_admin(&issuer, &new_admin);
 }
 
 #[test]
