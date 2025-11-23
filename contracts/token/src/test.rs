@@ -232,7 +232,7 @@ fn test_purchase_and_withdraw() {
 
     // Buyer purchases 500,000 tokens for 50,000,000 (0.1 USDC per token)
     let purchase_amount = 500_000_000;
-    client.purchase(&buyer, &purchase_amount);
+    client.purchase(&buyer, &buyer, &purchase_amount);
 
     // Check token balances after purchase
     let buyer_token_balance = client.balance(&buyer);
@@ -254,6 +254,91 @@ fn test_purchase_and_withdraw() {
 
     assert_eq!(admin_usdc_balance, 30_000_000);
     assert_eq!(updated_contract_usdc_balance, 20_000_000); // 50M - 30M
+}
+
+#[test]
+fn test_purchase_with_different_beneficiary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let buyer = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+    let usdc_token_admin_client = usdc_token.1;
+
+    let current_ledger = env.ledger().sequence();
+    let expiration_ledger = current_ledger + 100;
+
+    usdc_token_client.approve(
+        &buyer,
+        &contract_id,
+        &1_000_000_000i128,
+        &expiration_ledger
+    );
+
+    // Mint USDC to buyer
+    usdc_token_admin_client.mint(&buyer, &1_000_000_000);
+
+    // Create security token client
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token with price of 0.1 USDC per token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000, // 0.1 USDC per token
+            usdc_token_client.address.clone()
+        )
+    });
+
+    // Set KYC and compliance status for all parties
+    client.set_kyc_status(&admin, &issuer, &true);
+    client.set_kyc_status(&admin, &buyer, &true);
+    client.set_kyc_status(&admin, &beneficiary, &true);
+    client.set_compliance_status(&admin, &issuer, &ComplianceStatus::Approved);
+    client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
+    client.set_compliance_status(&admin, &beneficiary, &ComplianceStatus::Approved);
+
+    // Initial balances
+    let initial_buyer_token_balance = client.balance(&buyer);
+    let initial_beneficiary_token_balance = client.balance(&beneficiary);
+    let initial_issuer_token_balance = client.balance(&issuer);
+    let initial_buyer_usdc_balance = usdc_token_client.balance(&buyer);
+    assert_eq!(initial_buyer_token_balance, 0);
+    assert_eq!(initial_beneficiary_token_balance, 0);
+    assert_eq!(initial_issuer_token_balance, 1_000_000_000_000);
+    assert_eq!(initial_buyer_usdc_balance, 1_000_000_000);
+
+    // Buyer purchases 500,000 tokens for beneficiary (50,000,000 USDC at 0.1 USDC per token)
+    let purchase_amount = 500_000_000;
+    client.purchase(&buyer, &beneficiary, &purchase_amount);
+
+    // Check token balances after purchase
+    // Buyer should have 0 tokens (didn't receive any)
+    // Beneficiary should have the purchased tokens
+    let buyer_token_balance = client.balance(&buyer);
+    let beneficiary_token_balance = client.balance(&beneficiary);
+    let issuer_token_balance = client.balance(&issuer);
+    let buyer_usdc_balance = usdc_token_client.balance(&buyer);
+    let contract_usdc_balance = client.usdc_balance();
+
+    assert_eq!(buyer_token_balance, 0); // Buyer didn't receive tokens
+    assert_eq!(beneficiary_token_balance, 500_000_000); // Beneficiary received tokens
+    assert_eq!(issuer_token_balance, 999_500_000_000);
+    assert_eq!(buyer_usdc_balance, 950_000_000); // Buyer paid USDC: 1B - 50M
+    assert_eq!(contract_usdc_balance, 50_000_000);
 }
 
 // ===== Failure Test Cases =====
@@ -308,7 +393,7 @@ fn test_purchase_insufficient_usdc_balance() {
     // Attempt purchase that exceeds buyer's available USDC balance.
     // For example, if buyer can only afford 100 tokens, purchasing 200 tokens should fail.
     let purchase_amount = 200_000_000;
-    client.purchase(&buyer, &purchase_amount);
+    client.purchase(&buyer, &buyer, &purchase_amount);
 }
 
 #[test]
@@ -983,7 +1068,7 @@ fn test_withdraw_usdc_edge_cases() {
     client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
 
     // Make a purchase to accumulate USDC
-    client.purchase(&buyer, &500_000_000);
+    client.purchase(&buyer, &buyer, &500_000_000);
 
     // Test partial withdrawal
     client.withdraw_usdc(&admin, &25_000_000);
@@ -1083,7 +1168,7 @@ fn test_withdraw_usdc_exceeds_balance() {
     client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
 
     // Make a purchase to accumulate USDC
-    client.purchase(&buyer, &500_000_000);
+    client.purchase(&buyer, &buyer, &500_000_000);
 
     // Try to withdraw more than available
     client.withdraw_usdc(&admin, &100_000_000);
@@ -1144,7 +1229,7 @@ fn test_purchase_negative_amount() {
     client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
 
     // Try to purchase negative amount
-    client.purchase(&buyer, &-100_000);
+    client.purchase(&buyer, &buyer, &-100_000);
 }
 
 #[test]
@@ -1200,7 +1285,7 @@ fn test_purchase_zero_amount() {
     client.set_compliance_status(&admin, &buyer, &ComplianceStatus::Approved);
 
     // Try to purchase zero amount
-    client.purchase(&buyer, &0);
+    client.purchase(&buyer, &buyer, &0);
 }
 
 
@@ -1598,10 +1683,10 @@ fn test_usdc_balance_tracking() {
     assert_eq!(client.usdc_balance(), 0);
 
     // Make purchases and track balance
-    client.purchase(&buyer, &500_000_000);
+    client.purchase(&buyer, &buyer, &500_000_000);
     assert_eq!(client.usdc_balance(), 50_000_000);
 
-    client.purchase(&buyer, &300_000_000);
+    client.purchase(&buyer, &buyer, &300_000_000);
     assert_eq!(client.usdc_balance(), 80_000_000);
 
     // Withdraw and check balance
