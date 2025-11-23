@@ -301,19 +301,17 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(8));
         }
 
+        // Check if already an admin
+        if Self::is_admin(&env, &new_admin) {
+            return Err(Error::from_contract_error(9));
+        }
+
         // Get current admin list from INSTANCE storage
         let mut admins: Vec<Address> = env
             .storage()
             .instance()
             .get(&ADMINS_KEY)
             .unwrap();
-
-        // Check if already an admin
-        for existing_admin in admins.iter() {
-            if &existing_admin == &new_admin {
-                return Err(Error::from_contract_error(9));
-            }
-        }
 
         // Add to admin list
         admins.push_back(new_admin.clone());
