@@ -264,6 +264,11 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(6));
         }
 
+        // Validate amount is positive
+        if amount <= 0 {
+            return Err(Error::from_contract_error(25));
+        }
+
         // Get current balance from PERSISTENT storage
         let current_balance: i128 = env
             .storage()

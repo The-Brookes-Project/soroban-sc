@@ -522,6 +522,97 @@ fn test_clawback_partial_amount() {
     assert_eq!(issuer_balance_after, issuer_balance_before + 75_000);
 }
 
+#[test]
+#[should_panic(expected = "Error(Contract, #25)")]
+fn test_clawback_negative_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let (usdc_token_client, _) = create_token_contract(&env, &admin);
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address.clone()
+        )
+    });
+
+    // Set KYC and compliance for issuer and user1
+    client.set_kyc_status(&admin, &issuer, &true);
+    client.set_kyc_status(&admin, &user1, &true);
+    client.set_compliance_status(&admin, &issuer, &ComplianceStatus::Approved);
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Approved);
+
+    // Transfer tokens to user1
+    client.transfer(&issuer, &user1, &100_000);
+
+    let initial_balance = client.balance(&user1);
+    assert_eq!(initial_balance, 100_000);
+
+    // Attempt to clawback negative amount - should panic with error code 25
+    client.clawback(&admin, &user1, &-50_000);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #25)")]
+fn test_clawback_zero_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let (usdc_token_client, _) = create_token_contract(&env, &admin);
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address.clone()
+        )
+    });
+
+    // Set KYC and compliance for issuer and user1
+    client.set_kyc_status(&admin, &issuer, &true);
+    client.set_kyc_status(&admin, &user1, &true);
+    client.set_compliance_status(&admin, &issuer, &ComplianceStatus::Approved);
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Approved);
+
+    // Transfer tokens to user1
+    client.transfer(&issuer, &user1, &100_000);
+
+    // Attempt to clawback zero amount - should panic with error code 25
+    client.clawback(&admin, &user1, &0);
+}
+
 // ===== Additional Test Coverage =====
 
 #[test]
