@@ -103,6 +103,9 @@ impl SecurityTokenContract {
         if usdc_price <= 0 {
             panic!("USDC price must be positive");
         }
+        if home_domain.len() == 0 {
+            panic!("Home domain cannot be empty");
+        }
 
         // Validate USDC token address
         // Prevent setting the contract's own address as USDC token

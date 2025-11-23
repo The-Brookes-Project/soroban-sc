@@ -789,6 +789,36 @@ fn test_initialize_invalid_parameters() {
 }
 
 #[test]
+#[should_panic(expected = "Home domain cannot be empty")]
+fn test_initialize_empty_home_domain() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    // Initialize token with empty home_domain
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, ""), // Empty home_domain should panic
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #24)")]
 fn test_transfer_edge_cases() {
     let env = Env::default();
