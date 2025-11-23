@@ -279,13 +279,30 @@ impl SecurityTokenContract {
             amount
         };
 
-        // Update balance in PERSISTENT storage
+        // Get issuer address from metadata
+        let metadata = Self::get_metadata(&env);
+        
+        // Get issuer's current balance from PERSISTENT storage
+        let issuer_balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(metadata.issuer.clone()))
+            .unwrap_or(0);
+
+        // Update balances in PERSISTENT storage
         let new_balance = current_balance.checked_sub(actual_clawback_amount)
+            .ok_or(Error::from_contract_error(14))?;
+        
+        let new_issuer_balance = issuer_balance.checked_add(actual_clawback_amount)
             .ok_or(Error::from_contract_error(14))?;
         
         env.storage()
             .persistent()
             .set(&DataKey::Balance(from.clone()), &new_balance);
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(metadata.issuer.clone()), &new_issuer_balance);
 
         // Emit event with actual clawed back amount
         env.events().publish(

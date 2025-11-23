@@ -162,12 +162,19 @@ fn test_clawback() {
     let initial_balance = client.balance(&user1);
     assert_eq!(initial_balance, 100_000);
 
+    // Get issuer balance before clawback
+    let issuer_balance_before = client.balance(&issuer);
+
     // Execute clawback
     client.clawback(&admin, &user1, &25_000);
 
     // Verify balance after clawback
     let final_balance = client.balance(&user1);
     assert_eq!(final_balance, 75_000);
+    
+    // Verify issuer received the clawed back tokens
+    let issuer_balance_after = client.balance(&issuer);
+    assert_eq!(issuer_balance_after, issuer_balance_before + 25_000);
 }
 
 #[test]
@@ -443,12 +450,19 @@ fn test_clawback_exceeds_balance() {
     let initial_balance = client.balance(&user1);
     assert_eq!(initial_balance, 50_000);
 
+    // Get issuer balance before clawback
+    let issuer_balance_before = client.balance(&issuer);
+
     // Attempt to clawback more tokens than user1 holds - should clawback everything available
     client.clawback(&admin, &user1, &100_000);
 
     // Verify that all available balance was clawed back
     let final_balance = client.balance(&user1);
     assert_eq!(final_balance, 0);
+    
+    // Verify issuer received the clawed back tokens (50,000)
+    let issuer_balance_after = client.balance(&issuer);
+    assert_eq!(issuer_balance_after, issuer_balance_before + 50_000);
 }
 
 #[test]
@@ -493,12 +507,19 @@ fn test_clawback_partial_amount() {
     let initial_balance = client.balance(&user1);
     assert_eq!(initial_balance, 75_000);
 
+    // Get issuer balance before clawback
+    let issuer_balance_before = client.balance(&issuer);
+
     // Request to clawback 100,000 but only 75,000 available - should clawback 75,000
     client.clawback(&admin, &user1, &100_000);
 
     // Verify that only the available 75,000 was clawed back
     let final_balance = client.balance(&user1);
     assert_eq!(final_balance, 0);
+    
+    // Verify issuer received the clawed back tokens (75,000)
+    let issuer_balance_after = client.balance(&issuer);
+    assert_eq!(issuer_balance_after, issuer_balance_before + 75_000);
 }
 
 // ===== Additional Test Coverage =====
