@@ -8,6 +8,37 @@ const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
 const ADMINS_KEY: Symbol = symbol_short!("ADMINS");
 const USDC_BAL_KEY: Symbol = symbol_short!("USDC_BAL");
 
+// Business logic constants
+const MAX_DECIMALS: u32 = 7;
+const INITIAL_BALANCE: i128 = 0;
+const DECIMAL_BASE: i128 = 10;
+
+// Error codes
+const ERR_INVALID_AMOUNT: u32 = 1;
+const ERR_TRANSFER_RESTRICTED: u32 = 2;
+const ERR_NOT_ADMIN_KYC: u32 = 3;
+const ERR_NOT_ADMIN_COMPLIANCE: u32 = 4;
+const ERR_NOT_ADMIN_CLAWBACK: u32 = 5;
+const ERR_CLAWBACK_DISABLED: u32 = 6;
+const ERR_INSUFFICIENT_BALANCE_CLAWBACK: u32 = 7;
+const ERR_NOT_ADMIN_ADD_ADMIN: u32 = 8;
+const ERR_DUPLICATE_ADMIN: u32 = 9;
+const ERR_NOT_ADMIN_CONFIGURE_AUTH: u32 = 10;
+const ERR_NOT_ADMIN_TRANSFER_RESTRICTION: u32 = 11;
+const ERR_KYC_NOT_VERIFIED: u32 = 12;
+const ERR_COMPLIANCE_NOT_APPROVED: u32 = 13;
+const ERR_INSUFFICIENT_BALANCE: u32 = 14;
+const ERR_INVALID_PURCHASE_AMOUNT: u32 = 15;
+const ERR_CALCULATION_OVERFLOW: u32 = 16;
+const ERR_INSUFFICIENT_ISSUER_TOKENS: u32 = 17;
+const ERR_NOT_ADMIN_WITHDRAW: u32 = 18;
+const ERR_INVALID_WITHDRAW_AMOUNT: u32 = 19;
+const ERR_INSUFFICIENT_USDC_BALANCE: u32 = 20;
+const ERR_USDC_TRANSFER_VERIFICATION_FAILED: u32 = 21;
+const ERR_INSUFFICIENT_USDC_IN_CONTRACT: u32 = 22;
+const ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED: u32 = 23;
+const ERR_SELF_TRANSFER_NOT_ALLOWED: u32 = 24;
+
 // Define token metadata structure
 #[contracttype]
 #[derive(Clone)]
@@ -97,7 +128,7 @@ impl SecurityTokenContract {
         if total_supply <= 0 {
             panic!("Total supply must be positive");
         }
-        if decimals > 7 {
+        if decimals > MAX_DECIMALS {
             panic!("Decimals cannot exceed 7");
         }
         if usdc_price <= 0 {
@@ -139,7 +170,7 @@ impl SecurityTokenContract {
         env.storage().instance().set(&ADMINS_KEY, &admins);
 
         // Initialize USDC balance in INSTANCE storage
-        env.storage().instance().set(&USDC_BAL_KEY, &0i128);
+        env.storage().instance().set(&USDC_BAL_KEY, &INITIAL_BALANCE);
 
         // Assign total supply to issuer in PERSISTENT storage (user-specific data)
         env.storage()
@@ -159,7 +190,7 @@ impl SecurityTokenContract {
 
         // Validate amount
         if amount <= 0 {
-            return Err(Error::from_contract_error(1));
+            return Err(Error::from_contract_error(ERR_INVALID_AMOUNT));
         }
 
         // Load config from instance storage
@@ -169,7 +200,7 @@ impl SecurityTokenContract {
         if config.transfer_restricted {
             // Only admins can transfer when restricted
             if !Self::is_admin(&env, &from) {
-                return Err(Error::from_contract_error(2));
+                return Err(Error::from_contract_error(ERR_TRANSFER_RESTRICTED));
             }
         }
 
@@ -199,7 +230,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(3));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_KYC));
         }
 
         // Update KYC status in PERSISTENT storage
@@ -227,7 +258,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(4));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_COMPLIANCE));
         }
 
         // Update compliance status in PERSISTENT storage
@@ -255,13 +286,13 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(5));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_CLAWBACK));
         }
 
         // Check if clawback is enabled
         let config = Self::get_config(&env);
         if !config.clawback_enabled {
-            return Err(Error::from_contract_error(6));
+            return Err(Error::from_contract_error(ERR_CLAWBACK_DISABLED));
         }
 
         // Get current balance from PERSISTENT storage
@@ -272,12 +303,12 @@ impl SecurityTokenContract {
             .unwrap_or(0);
 
         if current_balance < amount {
-            return Err(Error::from_contract_error(7));
+            return Err(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE_CLAWBACK));
         }
 
         // Update balance in PERSISTENT storage
         let new_balance = current_balance.checked_sub(amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         
         env.storage()
             .persistent()
@@ -298,7 +329,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(8));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_ADD_ADMIN));
         }
 
         // Get current admin list from INSTANCE storage
@@ -311,7 +342,7 @@ impl SecurityTokenContract {
         // Check if already an admin
         for existing_admin in admins.iter() {
             if &existing_admin == &new_admin {
-                return Err(Error::from_contract_error(9));
+                return Err(Error::from_contract_error(ERR_DUPLICATE_ADMIN));
             }
         }
 
@@ -339,7 +370,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(10));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_CONFIGURE_AUTH));
         }
 
         // Update configuration in INSTANCE storage
@@ -367,7 +398,7 @@ impl SecurityTokenContract {
 
         // Validate amount
         if token_amount <= 0 {
-            return Err(Error::from_contract_error(15));
+            return Err(Error::from_contract_error(ERR_INVALID_PURCHASE_AMOUNT));
         }
 
         // Load metadata from instance storage
@@ -378,16 +409,16 @@ impl SecurityTokenContract {
         Self::check_compliance_requirements(&env, &config, &metadata.issuer, &buyer)?;
 
         // Calculate USDC amount needed
-        let decimals_pow = 10i128.checked_pow(metadata.decimals)
-            .ok_or(Error::from_contract_error(16))?;
+        let decimals_pow = DECIMAL_BASE.checked_pow(metadata.decimals)
+            .ok_or(Error::from_contract_error(ERR_CALCULATION_OVERFLOW))?;
 
         let usdc_amount = token_amount.checked_mul(metadata.usdc_price)
-            .ok_or(Error::from_contract_error(16))?
+            .ok_or(Error::from_contract_error(ERR_CALCULATION_OVERFLOW))?
             .checked_div(decimals_pow)
-            .ok_or(Error::from_contract_error(16))?;
+            .ok_or(Error::from_contract_error(ERR_CALCULATION_OVERFLOW))?;
 
         if usdc_amount <= 0 {
-            return Err(Error::from_contract_error(16));
+            return Err(Error::from_contract_error(ERR_CALCULATION_OVERFLOW));
         }
 
         // Get USDC token client
@@ -396,7 +427,7 @@ impl SecurityTokenContract {
         // Verify buyer has sufficient USDC balance BEFORE transfer
         let buyer_usdc_balance_before = usdc_token_client.balance(&buyer);
         if buyer_usdc_balance_before < usdc_amount {
-            return Err(Error::from_contract_error(20)); // Insufficient USDC balance
+            return Err(Error::from_contract_error(ERR_INSUFFICIENT_USDC_BALANCE));
         }
 
         // Get contract's initial USDC balance for verification
@@ -411,18 +442,18 @@ impl SecurityTokenContract {
 
         // Verify buyer's balance decreased by the expected amount
         let expected_buyer_balance = buyer_usdc_balance_before.checked_sub(usdc_amount)
-            .ok_or(Error::from_contract_error(21))?; // USDC transfer verification failed
+            .ok_or(Error::from_contract_error(ERR_USDC_TRANSFER_VERIFICATION_FAILED))?;
         
         if buyer_usdc_balance_after != expected_buyer_balance {
-            return Err(Error::from_contract_error(21)); // USDC transfer verification failed
+            return Err(Error::from_contract_error(ERR_USDC_TRANSFER_VERIFICATION_FAILED));
         }
 
         // Verify contract's balance increased by the expected amount
         let expected_contract_balance = contract_usdc_balance_before.checked_add(usdc_amount)
-            .ok_or(Error::from_contract_error(21))?; // USDC transfer verification failed
+            .ok_or(Error::from_contract_error(ERR_USDC_TRANSFER_VERIFICATION_FAILED))?;
         
         if contract_usdc_balance_after != expected_contract_balance {
-            return Err(Error::from_contract_error(21)); // USDC transfer verification failed
+            return Err(Error::from_contract_error(ERR_USDC_TRANSFER_VERIFICATION_FAILED));
         }
 
         // Get balances from PERSISTENT storage
@@ -440,14 +471,14 @@ impl SecurityTokenContract {
 
         // Check if issuer has enough tokens
         if issuer_balance < token_amount {
-            return Err(Error::from_contract_error(17));
+            return Err(Error::from_contract_error(ERR_INSUFFICIENT_ISSUER_TOKENS));
         }
 
         // Update token balances in PERSISTENT storage
         let new_issuer_balance = issuer_balance.checked_sub(token_amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         let new_buyer_balance = buyer_balance.checked_add(token_amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
 
         env.storage()
             .persistent()
@@ -463,7 +494,7 @@ impl SecurityTokenContract {
             .get(&USDC_BAL_KEY)
             .unwrap_or(0);
         let new_usdc_balance = current_usdc_balance.checked_add(usdc_amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         env.storage().instance().set(&USDC_BAL_KEY, &new_usdc_balance);
 
         // Emit purchase event
@@ -485,7 +516,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(18));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_WITHDRAW));
         }
 
         // Get USDC balance from INSTANCE storage
@@ -497,7 +528,7 @@ impl SecurityTokenContract {
 
         // Validate amount
         if amount <= 0 || amount > usdc_balance {
-            return Err(Error::from_contract_error(19));
+            return Err(Error::from_contract_error(ERR_INVALID_WITHDRAW_AMOUNT));
         }
 
         // Get metadata for USDC token address
@@ -510,7 +541,7 @@ impl SecurityTokenContract {
 
         // Verify contract has sufficient USDC before withdrawal
         if contract_usdc_balance_before < amount {
-            return Err(Error::from_contract_error(22)); // Insufficient USDC in contract
+            return Err(Error::from_contract_error(ERR_INSUFFICIENT_USDC_IN_CONTRACT));
         }
 
         // Transfer USDC from contract to admin
@@ -522,23 +553,23 @@ impl SecurityTokenContract {
 
         // Verify contract's balance decreased by the expected amount
         let expected_contract_balance = contract_usdc_balance_before.checked_sub(amount)
-            .ok_or(Error::from_contract_error(23))?; // USDC withdrawal verification failed
+            .ok_or(Error::from_contract_error(ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED))?;
         
         if contract_usdc_balance_after != expected_contract_balance {
-            return Err(Error::from_contract_error(23)); // USDC withdrawal verification failed
+            return Err(Error::from_contract_error(ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED));
         }
 
         // Verify admin's balance increased by the expected amount
         let expected_admin_balance = admin_usdc_balance_before.checked_add(amount)
-            .ok_or(Error::from_contract_error(23))?; // USDC withdrawal verification failed
+            .ok_or(Error::from_contract_error(ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED))?;
         
         if admin_usdc_balance_after != expected_admin_balance {
-            return Err(Error::from_contract_error(23)); // USDC withdrawal verification failed
+            return Err(Error::from_contract_error(ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED));
         }
 
         // Update USDC balance in INSTANCE storage
         let new_usdc_balance = usdc_balance.checked_sub(amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         env.storage().instance().set(&USDC_BAL_KEY, &new_usdc_balance);
 
         // Emit withdrawal event
@@ -560,7 +591,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(11));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_TRANSFER_RESTRICTION));
         }
 
         // Update configuration in INSTANCE storage
@@ -672,7 +703,7 @@ impl SecurityTokenContract {
                 .unwrap_or(false);
 
             if !from_kyc || !to_kyc {
-                return Err(Error::from_contract_error(12));
+                return Err(Error::from_contract_error(ERR_KYC_NOT_VERIFIED));
             }
 
             // Check compliance status for both addresses from PERSISTENT storage
@@ -691,7 +722,7 @@ impl SecurityTokenContract {
             if from_compliance != ComplianceStatus::Approved
                 || to_compliance != ComplianceStatus::Approved
             {
-                return Err(Error::from_contract_error(13));
+                return Err(Error::from_contract_error(ERR_COMPLIANCE_NOT_APPROVED));
             }
         }
 
@@ -707,7 +738,7 @@ impl SecurityTokenContract {
     ) -> Result<(), Error> {
         // Prevent self-transfers to avoid balance manipulation
         if from == to {
-            return Err(Error::from_contract_error(24)); // Self-transfer not allowed
+            return Err(Error::from_contract_error(ERR_SELF_TRANSFER_NOT_ALLOWED));
         }
 
         // Get current balances from PERSISTENT storage
@@ -725,14 +756,14 @@ impl SecurityTokenContract {
 
         // Check if sender has enough balance
         if from_balance < amount {
-            return Err(Error::from_contract_error(14));
+            return Err(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE));
         }
 
         // Update balances in PERSISTENT storage
         let new_from_balance = from_balance.checked_sub(amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         let new_to_balance = to_balance.checked_add(amount)
-            .ok_or(Error::from_contract_error(14))?;
+            .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
 
         env.storage()
             .persistent()
