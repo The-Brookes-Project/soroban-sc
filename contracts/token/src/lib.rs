@@ -264,12 +264,8 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(6));
         }
 
-        // Get current balance from PERSISTENT storage
-        let current_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(from.clone()))
-            .unwrap_or(0);
+        // Get current balance
+        let current_balance = Self::balance(env.clone(), from.clone());
 
         if current_balance < amount {
             return Err(Error::from_contract_error(7));
@@ -423,18 +419,9 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(21)); // USDC transfer verification failed
         }
 
-        // Get balances from PERSISTENT storage
-        let issuer_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(metadata.issuer.clone()))
-            .unwrap_or(0);
-
-        let buyer_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(buyer.clone()))
-            .unwrap_or(0);
+        // Get balances
+        let issuer_balance = Self::balance(env.clone(), metadata.issuer.clone());
+        let buyer_balance = Self::balance(env.clone(), buyer.clone());
 
         // Check if issuer has enough tokens
         if issuer_balance < token_amount {
@@ -455,11 +442,7 @@ impl SecurityTokenContract {
             .set(&DataKey::Balance(buyer.clone()), &new_buyer_balance);
 
         // Update USDC balance in INSTANCE storage
-        let current_usdc_balance: i128 = env
-            .storage()
-            .instance()
-            .get(&USDC_BAL_KEY)
-            .unwrap_or(0);
+        let current_usdc_balance = Self::usdc_balance(env.clone());
         let new_usdc_balance = current_usdc_balance.checked_add(usdc_amount)
             .ok_or(Error::from_contract_error(14))?;
         env.storage().instance().set(&USDC_BAL_KEY, &new_usdc_balance);
@@ -486,12 +469,8 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(18));
         }
 
-        // Get USDC balance from INSTANCE storage
-        let usdc_balance: i128 = env
-            .storage()
-            .instance()
-            .get(&USDC_BAL_KEY)
-            .unwrap_or(0);
+        // Get USDC balance
+        let usdc_balance = Self::usdc_balance(env.clone());
 
         // Validate amount
         if amount <= 0 || amount > usdc_balance {
@@ -656,35 +635,17 @@ impl SecurityTokenContract {
     ) -> Result<(), Error> {
         // Check authorization required flag
         if config.authorization_required {
-            // Check KYC status for both addresses from PERSISTENT storage
-            let from_kyc = env
-                .storage()
-                .persistent()
-                .get(&DataKey::KycVerified(from.clone()))
-                .unwrap_or(false);
-
-            let to_kyc = env
-                .storage()
-                .persistent()
-                .get(&DataKey::KycVerified(to.clone()))
-                .unwrap_or(false);
+            // Check KYC status for both addresses
+            let from_kyc = Self::is_kyc_verified(env.clone(), from.clone());
+            let to_kyc = Self::is_kyc_verified(env.clone(), to.clone());
 
             if !from_kyc || !to_kyc {
                 return Err(Error::from_contract_error(12));
             }
 
-            // Check compliance status for both addresses from PERSISTENT storage
-            let from_compliance = env
-                .storage()
-                .persistent()
-                .get(&DataKey::ComplianceStatus(from.clone()))
-                .unwrap_or(ComplianceStatus::Pending);
-
-            let to_compliance = env
-                .storage()
-                .persistent()
-                .get(&DataKey::ComplianceStatus(to.clone()))
-                .unwrap_or(ComplianceStatus::Pending);
+            // Check compliance status for both addresses
+            let from_compliance = Self::check_compliance(env.clone(), from.clone());
+            let to_compliance = Self::check_compliance(env.clone(), to.clone());
 
             if from_compliance != ComplianceStatus::Approved
                 || to_compliance != ComplianceStatus::Approved
@@ -708,18 +669,9 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(24)); // Self-transfer not allowed
         }
 
-        // Get current balances from PERSISTENT storage
-        let from_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(from.clone()))
-            .unwrap_or(0);
-
-        let to_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Balance(to.clone()))
-            .unwrap_or(0);
+        // Get current balances
+        let from_balance = Self::balance(env.clone(), from.clone());
+        let to_balance = Self::balance(env.clone(), to.clone());
 
         // Check if sender has enough balance
         if from_balance < amount {
