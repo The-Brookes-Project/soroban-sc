@@ -17,11 +17,32 @@ fn create_token_contract<'a>(
     )
 }
 
+fn create_security_token(
+    env: &Env,
+    issuer: &Address,
+    admin: &Address,
+    usdc_token: &Address,
+) -> Address {
+    env.register(
+        SecurityTokenContract,
+        (
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6u32,
+            1_000_000_000_000i128,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000i128, // 0.1 USDC per token
+            usdc_token.clone()
+        )
+    )
+}
+
 #[test]
 fn test_initialize() {
     let env = Env::default();
     env.mock_all_auths(); // Add auth mocking
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -29,23 +50,23 @@ fn test_initialize() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
+    // Initialize token via constructor during registration
+    let contract_id = env.register(
+        SecurityTokenContract,
+        (
             String::from_str(&env, "Security Token"),
             String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
+            6u32,
+            1_000_000_000_000i128,
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000, // 0.1 USDC per token
-            usdc_token_client.address
+            100_000i128, // 0.1 USDC per token
+            usdc_token_client.address.clone()
         )
-    });
+    );
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_metadata().name, String::from_str(&env, "Security Token"));
     assert_eq!(client.get_metadata().symbol, String::from_str(&env, "SCTY"));
@@ -61,7 +82,6 @@ fn test_initialize() {
 fn test_transfer_with_compliance() {
     let env = Env::default();
     env.mock_all_auths(); // Move auth mocking to the beginning
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -71,24 +91,11 @@ fn test_transfer_with_compliance() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
+
     // Create client
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000, // 0.1 USDC per token
-            usdc_token_client.address
-        )
-    });
 
     // Set KYC status for users
     client.set_kyc_status(&admin, &issuer, &true);
@@ -123,7 +130,6 @@ fn test_transfer_with_compliance() {
 fn test_clawback() {
     let env = Env::default();
     env.mock_all_auths(); // Move auth mocking to the beginning
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -132,23 +138,10 @@ fn test_clawback() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000, // 0.1 USDC per token
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set KYC and compliance status
     client.set_kyc_status(&admin, &issuer, &true);
@@ -174,7 +167,6 @@ fn test_clawback() {
 fn test_purchase_and_withdraw() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -183,6 +175,9 @@ fn test_purchase_and_withdraw() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -199,22 +194,6 @@ fn test_purchase_and_withdraw() {
 
     // Create security token client
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token with price of 0.1 USDC per token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000, // 0.1 USDC per token
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set KYC and compliance status
     client.set_kyc_status(&admin, &issuer, &true);
@@ -262,13 +241,15 @@ fn test_purchase_and_withdraw() {
 #[should_panic]
 fn test_purchase_insufficient_usdc_balance() {
     let env = Env::default();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
 
     // Setup test USDC token contract
     let (usdc_token_client, usdc_token_admin_client) = create_token_contract(&env, &admin);
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -282,22 +263,6 @@ fn test_purchase_insufficient_usdc_balance() {
     usdc_token_admin_client.mint(&buyer, &10_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token with a token price of 100_000 per token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set KYC and compliance status for issuer and buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -315,7 +280,6 @@ fn test_purchase_insufficient_usdc_balance() {
 #[should_panic]
 fn test_transfer_without_kyc() {
     let env = Env::default();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -323,23 +287,10 @@ fn test_transfer_without_kyc() {
     // Setup test USDC token contract
     let (usdc_token_client, _) = create_token_contract(&env, &admin);
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     env.mock_all_auths();
 
@@ -356,7 +307,6 @@ fn test_transfer_without_kyc() {
 #[should_panic]
 fn test_transfer_restricted_fail() {
     let env = Env::default();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -364,23 +314,10 @@ fn test_transfer_restricted_fail() {
     // Setup test USDC token contract
     let (usdc_token_client, _) = create_token_contract(&env, &admin);
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000, // USDC price per token
-            usdc_token_client.address.clone()
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     env.mock_all_auths();
 
@@ -405,7 +342,6 @@ fn test_transfer_restricted_fail() {
 #[should_panic]
 fn test_clawback_exceeds_balance() {
     let env = Env::default();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -413,23 +349,10 @@ fn test_clawback_exceeds_balance() {
     // Setup test USDC token contract
     let (usdc_token_client, _) = create_token_contract(&env, &admin);
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     env.mock_all_auths();
 
@@ -452,7 +375,6 @@ fn test_clawback_exceeds_balance() {
 fn test_add_admin() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
@@ -461,23 +383,10 @@ fn test_add_admin() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Add new admin
     client.add_admin(&admin, &new_admin);
@@ -492,7 +401,6 @@ fn test_add_admin() {
 fn test_add_admin_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let non_admin = Address::generate(&env);
@@ -502,23 +410,10 @@ fn test_add_admin_unauthorized() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Non-admin tries to add admin should fail
     client.add_admin(&non_admin, &new_admin);
@@ -529,7 +424,6 @@ fn test_add_admin_unauthorized() {
 fn test_add_admin_duplicate() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -537,23 +431,10 @@ fn test_add_admin_duplicate() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Try to add admin again should fail
     client.add_admin(&admin, &admin);
@@ -563,7 +444,6 @@ fn test_add_admin_duplicate() {
 fn test_configure_authorization() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -573,23 +453,10 @@ fn test_configure_authorization() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up users with KYC and compliance
     client.set_kyc_status(&admin, &issuer, &true);
@@ -621,7 +488,6 @@ fn test_configure_authorization() {
 fn test_configure_authorization_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let non_admin = Address::generate(&env);
@@ -630,23 +496,10 @@ fn test_configure_authorization_unauthorized() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Non-admin tries to configure authorization should fail
     client.configure_authorization(&non_admin, &false, &false);
@@ -656,7 +509,6 @@ fn test_configure_authorization_unauthorized() {
 fn test_view_functions() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -665,23 +517,10 @@ fn test_view_functions() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Test check_compliance for different statuses
     let issuer_compliance = client.check_compliance(&issuer);
@@ -710,52 +549,25 @@ fn test_view_functions() {
 }
 
 #[test]
-#[should_panic]
 fn test_initialize_validation() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
     // Setup test USDC token contract
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
-    let usdc_address = usdc_token_client.address.clone(); // Clone the address
 
+    // Initialize token via constructor - with constructors, double initialization is prevented by design
+    // The constructor only runs once during contract deployment
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
+    
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_address.clone() // Use cloned address
-        )
-    });
-
-    // Test that double initialization fails
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token 2"),
-            String::from_str(&env, "SCTY2"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address // Use original address
-        )
-    });
+    
+    // Verify the contract was initialized correctly
+    assert_eq!(client.get_metadata().name, String::from_str(&env, "Security Token"));
+    assert_eq!(client.balance(&issuer), 1_000_000_000_000);
 }
 
 #[test]
@@ -763,7 +575,6 @@ fn test_initialize_validation() {
 fn test_initialize_invalid_parameters() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -771,21 +582,21 @@ fn test_initialize_invalid_parameters() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    // Initialize token with invalid parameters
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
+    // Initialize token with invalid parameters (decimals > 7)
+    let _contract_id = env.register(
+        SecurityTokenContract,
+        (
             String::from_str(&env, "Security Token"),
             String::from_str(&env, "SCTY"),
-            8, // Invalid: decimals > 7
-            1_000_000_000_000,
+            8u32, // Invalid: decimals > 7
+            1_000_000_000_000i128,
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000,
-            usdc_token_client.address
+            100_000i128,
+            usdc_token_client.address.clone()
         )
-    });
+    );
 }
 
 #[test]
@@ -793,7 +604,6 @@ fn test_initialize_invalid_parameters() {
 fn test_transfer_edge_cases() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -802,23 +612,10 @@ fn test_transfer_edge_cases() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up user
     client.set_kyc_status(&admin, &issuer, &true);
@@ -846,7 +643,6 @@ fn test_transfer_edge_cases() {
 fn test_transfer_insufficient_balance() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -856,23 +652,10 @@ fn test_transfer_insufficient_balance() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up users
     client.set_kyc_status(&admin, &issuer, &true);
@@ -894,7 +677,6 @@ fn test_transfer_insufficient_balance() {
 fn test_transfer_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -903,23 +685,10 @@ fn test_transfer_zero_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up user
     client.set_kyc_status(&admin, &issuer, &true);
@@ -935,7 +704,6 @@ fn test_transfer_zero_amount() {
 fn test_withdraw_usdc_edge_cases() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -944,6 +712,9 @@ fn test_withdraw_usdc_edge_cases() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -959,22 +730,6 @@ fn test_withdraw_usdc_edge_cases() {
     usdc_token_admin_client.mint(&buyer, &1_000_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set up buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -999,7 +754,6 @@ fn test_withdraw_usdc_edge_cases() {
 fn test_withdraw_usdc_unauthorized() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let non_admin = Address::generate(&env);
@@ -1008,23 +762,10 @@ fn test_withdraw_usdc_unauthorized() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Non-admin tries to withdraw USDC
     client.withdraw_usdc(&non_admin, &10_000_000);
@@ -1035,7 +776,6 @@ fn test_withdraw_usdc_unauthorized() {
 fn test_withdraw_usdc_exceeds_balance() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -1044,6 +784,9 @@ fn test_withdraw_usdc_exceeds_balance() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -1059,22 +802,6 @@ fn test_withdraw_usdc_exceeds_balance() {
     usdc_token_admin_client.mint(&buyer, &1_000_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set up buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1096,7 +823,6 @@ fn test_withdraw_usdc_exceeds_balance() {
 fn test_purchase_negative_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -1105,6 +831,9 @@ fn test_purchase_negative_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -1120,22 +849,6 @@ fn test_purchase_negative_amount() {
     usdc_token_admin_client.mint(&buyer, &1_000_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set up buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1152,7 +865,6 @@ fn test_purchase_negative_amount() {
 fn test_purchase_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -1161,6 +873,9 @@ fn test_purchase_zero_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -1176,22 +891,6 @@ fn test_purchase_zero_amount() {
     usdc_token_admin_client.mint(&buyer, &1_000_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set up buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1210,7 +909,6 @@ fn test_purchase_zero_amount() {
 fn test_withdraw_usdc_negative_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -1218,23 +916,10 @@ fn test_withdraw_usdc_negative_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Try to withdraw negative amount
     client.withdraw_usdc(&admin, &-10_000_000);
@@ -1245,7 +930,6 @@ fn test_withdraw_usdc_negative_amount() {
 fn test_withdraw_usdc_zero_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -1253,23 +937,10 @@ fn test_withdraw_usdc_zero_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Try to withdraw zero amount
     client.withdraw_usdc(&admin, &0);
@@ -1280,7 +951,6 @@ fn test_withdraw_usdc_zero_amount() {
 fn test_transfer_negative_amount() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -1289,23 +959,10 @@ fn test_transfer_negative_amount() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up user
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1321,7 +978,6 @@ fn test_transfer_negative_amount() {
 fn test_compliance_status_transitions() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -1330,23 +986,10 @@ fn test_compliance_status_transitions() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Test all compliance status transitions
     client.set_compliance_status(&admin, &user1, &ComplianceStatus::Pending);
@@ -1366,7 +1009,6 @@ fn test_compliance_status_transitions() {
 fn test_kyc_status_transitions() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -1375,23 +1017,10 @@ fn test_kyc_status_transitions() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Test KYC status transitions
     assert_eq!(client.is_kyc_verified(&user1), false);
@@ -1407,7 +1036,6 @@ fn test_kyc_status_transitions() {
 fn test_transfer_restriction_toggle() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -1416,23 +1044,10 @@ fn test_transfer_restriction_toggle() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Set up user
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1457,32 +1072,17 @@ fn test_transfer_restriction_toggle() {
 fn test_metadata_retrieval() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
     // Setup test USDC token contract
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
-    let usdc_address = usdc_token_client.address.clone(); // Clone the address
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_address.clone() // Use cloned address
-        )
-    });
 
     // Test metadata retrieval
     let metadata = client.get_metadata();
@@ -1500,7 +1100,6 @@ fn test_metadata_retrieval() {
 fn test_balance_queries() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let user1 = Address::generate(&env);
@@ -1509,23 +1108,10 @@ fn test_balance_queries() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Test balance queries
     assert_eq!(client.balance(&issuer), 1_000_000_000_000);
@@ -1547,7 +1133,6 @@ fn test_balance_queries() {
 fn test_usdc_balance_tracking() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
     let buyer = Address::generate(&env);
@@ -1556,6 +1141,9 @@ fn test_usdc_balance_tracking() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
     let usdc_token_admin_client = usdc_token.1;
+
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
     let current_ledger = env.ledger().sequence();
     let expiration_ledger = current_ledger + 100;
@@ -1571,22 +1159,6 @@ fn test_usdc_balance_tracking() {
     usdc_token_admin_client.mint(&buyer, &1_000_000_000);
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
-
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address.clone()
-        )
-    });
 
     // Set up buyer
     client.set_kyc_status(&admin, &issuer, &true);
@@ -1613,7 +1185,6 @@ fn test_usdc_balance_tracking() {
 fn test_token_price_retrieval() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(SecurityTokenContract, ());
     let issuer = Address::generate(&env);
     let admin = Address::generate(&env);
 
@@ -1621,23 +1192,10 @@ fn test_token_price_retrieval() {
     let usdc_token = create_token_contract(&env, &admin);
     let usdc_token_client = usdc_token.0;
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
+    // Initialize token via constructor
+    let contract_id = create_security_token(&env, &issuer, &admin, &usdc_token_client.address);
 
-    // Initialize token
-    env.as_contract(&contract_id, || {
-        SecurityTokenContract::initialize(
-            env.clone(),
-            String::from_str(&env, "Security Token"),
-            String::from_str(&env, "SCTY"),
-            6,
-            1_000_000_000_000,
-            issuer.clone(),
-            String::from_str(&env, "example.com"),
-            admin.clone(),
-            100_000,
-            usdc_token_client.address
-        )
-    });
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
 
     // Test token price retrieval
     assert_eq!(client.token_price(), 100_000);
