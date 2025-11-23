@@ -202,6 +202,22 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(3));
         }
 
+        // Check if authorization is revocable when attempting to revoke
+        let config = Self::get_config(&env);
+        if !config.authorization_revocable && !verified {
+            // Get current KYC status
+            let current_kyc: bool = env
+                .storage()
+                .persistent()
+                .get(&DataKey::KycVerified(address.clone()))
+                .unwrap_or(false);
+            
+            // If currently verified and trying to revoke, check if revocation is allowed
+            if current_kyc {
+                return Err(Error::from_contract_error(25)); // Authorization not revocable
+            }
+        }
+
         // Update KYC status in PERSISTENT storage
         env.storage()
             .persistent()
@@ -228,6 +244,22 @@ impl SecurityTokenContract {
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
             return Err(Error::from_contract_error(4));
+        }
+
+        // Check if authorization is revocable when attempting to downgrade from Approved
+        let config = Self::get_config(&env);
+        if !config.authorization_revocable && status != ComplianceStatus::Approved {
+            // Get current compliance status
+            let current_status: ComplianceStatus = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ComplianceStatus(address.clone()))
+                .unwrap_or(ComplianceStatus::Pending);
+            
+            // If currently approved and trying to change to non-approved, check if revocation is allowed
+            if current_status == ComplianceStatus::Approved {
+                return Err(Error::from_contract_error(25)); // Authorization not revocable
+            }
         }
 
         // Update compliance status in PERSISTENT storage

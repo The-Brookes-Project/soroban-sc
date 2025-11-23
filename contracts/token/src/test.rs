@@ -723,8 +723,6 @@ fn test_initialize_validation() {
     let usdc_token_client = usdc_token.0;
     let usdc_address = usdc_token_client.address.clone(); // Clone the address
 
-    let client = SecurityTokenContractClient::new(&env, &contract_id);
-
     // Initialize token
     env.as_contract(&contract_id, || {
         SecurityTokenContract::initialize(
@@ -1641,4 +1639,170 @@ fn test_token_price_retrieval() {
 
     // Test token price retrieval
     assert_eq!(client.token_price(), 100_000);
+}
+
+#[test]
+#[should_panic]
+fn test_authorization_revocable_kyc_revoke_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token with authorization_revocable = true (default)
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Grant KYC
+    client.set_kyc_status(&admin, &user1, &true);
+    assert_eq!(client.is_kyc_verified(&user1), true);
+
+    // Configure authorization to be non-revocable
+    client.configure_authorization(&admin, &true, &false);
+
+    // Attempt to revoke KYC should fail
+    client.set_kyc_status(&admin, &user1, &false);
+}
+
+#[test]
+#[should_panic]
+fn test_authorization_revocable_compliance_revoke_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token with authorization_revocable = true (default)
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Grant compliance
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Approved);
+    assert_eq!(client.check_compliance(&user1), ComplianceStatus::Approved);
+
+    // Configure authorization to be non-revocable
+    client.configure_authorization(&admin, &true, &false);
+
+    // Attempt to revoke compliance should fail
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Rejected);
+}
+
+#[test]
+fn test_authorization_revocable_kyc_revoke_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token with authorization_revocable = true (default)
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Grant KYC
+    client.set_kyc_status(&admin, &user1, &true);
+    assert_eq!(client.is_kyc_verified(&user1), true);
+
+    // Revoke KYC should succeed (authorization_revocable = true by default)
+    client.set_kyc_status(&admin, &user1, &false);
+    assert_eq!(client.is_kyc_verified(&user1), false);
+}
+
+#[test]
+fn test_authorization_revocable_compliance_revoke_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let user1 = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    let client = SecurityTokenContractClient::new(&env, &contract_id);
+
+    // Initialize token with authorization_revocable = true (default)
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+
+    // Grant compliance
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Approved);
+    assert_eq!(client.check_compliance(&user1), ComplianceStatus::Approved);
+
+    // Revoke compliance should succeed (authorization_revocable = true by default)
+    client.set_compliance_status(&admin, &user1, &ComplianceStatus::Rejected);
+    assert_eq!(client.check_compliance(&user1), ComplianceStatus::Rejected);
 }
