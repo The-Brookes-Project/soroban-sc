@@ -28,7 +28,6 @@ pub struct TokenMetadata {
 pub struct ContractConfig {
     pub authorization_required: bool,
     pub authorization_revocable: bool,
-    pub clawback_enabled: bool,
     pub transfer_restricted: bool,
 }
 
@@ -127,7 +126,6 @@ impl SecurityTokenContract {
         let config = ContractConfig {
             authorization_required: true,
             authorization_revocable: true,
-            clawback_enabled: true,
             transfer_restricted: true,
         };
         env.storage().instance().set(&CONFIG_KEY, &config);
@@ -256,12 +254,6 @@ impl SecurityTokenContract {
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
             return Err(Error::from_contract_error(5));
-        }
-
-        // Check if clawback is enabled
-        let config = Self::get_config(&env);
-        if !config.clawback_enabled {
-            return Err(Error::from_contract_error(6));
         }
 
         // Validate amount is positive
