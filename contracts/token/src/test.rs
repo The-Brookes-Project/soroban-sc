@@ -684,8 +684,9 @@ fn test_view_functions() {
     });
 
     // Test check_compliance for different statuses
+    // Issuer is now auto-approved during initialization
     let issuer_compliance = client.check_compliance(&issuer);
-    assert_eq!(issuer_compliance, ComplianceStatus::Pending);
+    assert_eq!(issuer_compliance, ComplianceStatus::Approved);
 
     // Set compliance status and test
     client.set_compliance_status(&admin, &user1, &ComplianceStatus::Approved);
@@ -697,8 +698,9 @@ fn test_view_functions() {
     assert_eq!(user1_compliance_rejected, ComplianceStatus::Rejected);
 
     // Test is_kyc_verified
+    // Issuer is now auto-approved during initialization
     let issuer_kyc = client.is_kyc_verified(&issuer);
-    assert_eq!(issuer_kyc, false);
+    assert_eq!(issuer_kyc, true);
 
     client.set_kyc_status(&admin, &user1, &true);
     let user1_kyc = client.is_kyc_verified(&user1);

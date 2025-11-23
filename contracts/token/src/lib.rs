@@ -146,6 +146,14 @@ impl SecurityTokenContract {
             .persistent()
             .set(&DataKey::Balance(issuer.clone()), &total_supply);
 
+        // Auto-approve issuer for KYC and compliance since they're the token creator
+        env.storage()
+            .persistent()
+            .set(&DataKey::KycVerified(issuer.clone()), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ComplianceStatus(issuer.clone()), &ComplianceStatus::Approved);
+
         // Emit initialization event
         env.events().publish(
             (symbol_short!("init"),),
