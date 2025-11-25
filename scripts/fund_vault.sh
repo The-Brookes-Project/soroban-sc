@@ -36,15 +36,14 @@ if [ -z "$USDC_ID" ]; then
 fi
 echo -e "${YELLOW}USDC Contract ID: $USDC_ID${NC}"
 
-# 3. Transfer USDC to Vault
-echo -e "${GREEN}Transferring $10 USDC ($AMOUNT stroops) from $SOURCE to Vault...${NC}"
+# 3. Fund Vault via fund_vault method
+echo -e "${GREEN}Funding vault with $10 USDC ($AMOUNT stroops) via fund_vault method...${NC}"
 stellar contract invoke \
-    --id $USDC_ID \
+    --id $VAULT_ID \
     --source $SOURCE \
     --network $NETWORK \
-    -- transfer \
-    --from $SOURCE \
-    --to $VAULT_ID \
+    -- fund_vault \
+    --admin $SOURCE \
     --amount $AMOUNT
 
 if [ $? -eq 0 ]; then
