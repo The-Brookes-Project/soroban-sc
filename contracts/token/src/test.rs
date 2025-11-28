@@ -42,7 +42,7 @@ fn test_initialize() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000, // 0.1 USDC per token
+            100_000, // 0.01 USDC per token (7 decimals)
             usdc_token_client.address
         )
     });
@@ -85,7 +85,7 @@ fn test_transfer_with_compliance() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000, // 0.1 USDC per token
+            100_000, // 0.01 USDC per token (7 decimals)
             usdc_token_client.address
         )
     });
@@ -145,7 +145,7 @@ fn test_clawback() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000, // 0.1 USDC per token
+            100_000, // 0.01 USDC per token (7 decimals)
             usdc_token_client.address
         )
     });
@@ -200,7 +200,7 @@ fn test_purchase_and_withdraw() {
     // Create security token client
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
-    // Initialize token with price of 0.1 USDC per token
+    // Initialize token with price of 0.01 USDC per token (7 decimals)
     env.as_contract(&contract_id, || {
         SecurityTokenContract::initialize(
             env.clone(),
@@ -211,7 +211,7 @@ fn test_purchase_and_withdraw() {
             issuer.clone(),
             String::from_str(&env, "example.com"),
             admin.clone(),
-            100_000, // 0.1 USDC per token
+            100_000, // 0.01 USDC per token (7 decimals)
             usdc_token_client.address.clone()
         )
     });
@@ -230,7 +230,7 @@ fn test_purchase_and_withdraw() {
     assert_eq!(initial_issuer_token_balance, 1_000_000_000_000);
     assert_eq!(initial_buyer_usdc_balance, 1_000_000_000);
 
-    // Buyer purchases 500,000 tokens for 50,000,000 (0.1 USDC per token)
+    // Buyer purchases 500,000 tokens for 50,000,000 (0.01 USDC per token)
     let purchase_amount = 500_000_000;
     client.purchase(&buyer, &purchase_amount);
 
