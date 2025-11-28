@@ -71,8 +71,9 @@ pub struct SecurityTokenContract;
 
 #[contractimpl]
 impl SecurityTokenContract {
-    // Initialize the token with required parameters
-    pub fn initialize(
+    // Constructor to initialize the token with required parameters (Protocol 22+)
+    // Runs once during contract deployment, preventing front-running attacks
+    pub fn __constructor(
         env: Env,
         name: String,
         symbol: String,
@@ -86,11 +87,6 @@ impl SecurityTokenContract {
     ) {
         // Require authorization from the admin who is initializing
         admin.require_auth();
-
-        // Ensure the contract is only initialized once
-        if env.storage().instance().has(&METADATA_KEY) {
-            panic!("Token already initialized");
-        }
 
         // Validate parameters
         if total_supply <= 0 {
