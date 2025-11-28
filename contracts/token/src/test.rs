@@ -879,6 +879,152 @@ fn test_initialize_empty_symbol() {
 }
 
 #[test]
+#[should_panic(expected = "Name cannot exceed 64 characters")]
+fn test_initialize_name_too_long() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    // Create a name longer than 64 characters
+    let long_name = String::from_str(&env, "This is a very long token name that exceeds the maximum allowed length of 64 characters");
+
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            long_name,
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
+#[should_panic(expected = "Symbol cannot exceed 12 characters")]
+fn test_initialize_symbol_too_long() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "VERYLONGSYMBOL"), // 14 characters
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
+#[should_panic(expected = "Home domain cannot exceed 256 characters")]
+fn test_initialize_home_domain_too_long() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    // Create a home_domain longer than 256 characters (this string is 260+ chars)
+    let long_domain = String::from_str(&env, "this-is-a-very-long-domain-name-that-exceeds-the-maximum-allowed-length-of-256-characters-and-should-trigger-the-validation-error-when-initializing-the-token-contract-because-we-need-to-ensure-proper-bounds-checking-for-all-string-parameters-in-the-code.example.com");
+
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            long_domain,
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
+#[should_panic(expected = "Total supply cannot exceed 1 quintillion")]
+fn test_initialize_total_supply_too_large() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000_000_001, // Exceeds 1 quintillion
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
+#[should_panic(expected = "USDC price cannot exceed 1 trillion")]
+fn test_initialize_usdc_price_too_large() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            1_000_000_000_001, // Exceeds 1 trillion
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #24)")]
 fn test_transfer_edge_cases() {
     let env = Env::default();

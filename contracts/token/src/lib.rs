@@ -97,20 +97,35 @@ impl SecurityTokenContract {
         if total_supply <= 0 {
             panic!("Total supply must be positive");
         }
+        if total_supply > 1_000_000_000_000_000_000 {
+            panic!("Total supply cannot exceed 1 quintillion");
+        }
         if decimals > 7 {
             panic!("Decimals cannot exceed 7");
         }
         if usdc_price <= 0 {
             panic!("USDC price must be positive");
         }
+        if usdc_price > 1_000_000_000_000 {
+            panic!("USDC price cannot exceed 1 trillion");
+        }
         if home_domain.len() == 0 {
             panic!("Home domain cannot be empty");
+        }
+        if home_domain.len() > 256 {
+            panic!("Home domain cannot exceed 256 characters");
         }
         if name.len() == 0 {
             panic!("Name cannot be empty");
         }
+        if name.len() > 64 {
+            panic!("Name cannot exceed 64 characters");
+        }
         if symbol.len() == 0 {
             panic!("Symbol cannot be empty");
+        }
+        if symbol.len() > 12 {
+            panic!("Symbol cannot exceed 12 characters");
         }
 
         // Validate USDC token address
