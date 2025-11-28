@@ -209,7 +209,7 @@ fn test_purchase_and_withdraw() {
     assert_eq!(initial_issuer_token_balance, 1_000_000_000_000);
     assert_eq!(initial_buyer_usdc_balance, 1_000_000_000);
 
-    // Buyer purchases 500,000 tokens for 50,000,000 (0.1 USDC per token)
+    // Buyer purchases 500,000 tokens for 50,000,000 (0.01 USDC per token)
     let purchase_amount = 500_000_000;
     client.purchase(&buyer, &buyer, &purchase_amount);
 
