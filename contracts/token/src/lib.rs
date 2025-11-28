@@ -2,6 +2,13 @@
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Vec,
                   symbol_short, Error, Symbol};
 
+// TTL constants (industry standard values)
+// ~12 ledgers per minute, ~17280 ledgers per day
+const INSTANCE_TTL_THRESHOLD: u32 = 535_680;   // ~31 days
+const INSTANCE_TTL_EXTEND: u32 = 1_589_760;    // ~92 days
+const PERSISTENT_TTL_THRESHOLD: u32 = 535_680;  // ~31 days
+const PERSISTENT_TTL_EXTEND: u32 = 1_589_760;   // ~92 days
+
 // Storage keys
 const METADATA_KEY: Symbol = symbol_short!("METADATA");
 const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
@@ -195,9 +202,14 @@ impl SecurityTokenContract {
         env.storage().instance().set(&USDC_BAL_KEY, &INITIAL_BALANCE);
 
         // Assign total supply to issuer in PERSISTENT storage (user-specific data)
+        let issuer_balance_key = DataKey::Balance(issuer.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(issuer.clone()), &total_supply);
+            .set(&issuer_balance_key, &total_supply);
+
+        // Extend TTLs for all storage entries
+        Self::extend_instance_ttl(&env);
+        Self::extend_persistent_ttl(&env, &issuer_balance_key);
 
         // Auto-approve issuer for KYC and compliance since they're the token creator
         env.storage()
@@ -280,9 +292,13 @@ impl SecurityTokenContract {
         }
 
         // Update KYC status in PERSISTENT storage
+        let kyc_key = DataKey::KycVerified(address.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::KycVerified(address.clone()), &verified);
+            .set(&kyc_key, &verified);
+
+        // Extend TTL for the KYC entry
+        Self::extend_persistent_ttl(&env, &kyc_key);
 
         // Emit event
         env.events().publish(
@@ -324,9 +340,13 @@ impl SecurityTokenContract {
         }
 
         // Update compliance status in PERSISTENT storage
+        let compliance_key = DataKey::ComplianceStatus(address.clone());
         env.storage()
             .persistent()
-            .set(&DataKey::ComplianceStatus(address.clone()), &status);
+            .set(&compliance_key, &status);
+
+        // Extend TTL for the compliance entry
+        Self::extend_persistent_ttl(&env, &compliance_key);
 
         // Emit event
         env.events().publish(
@@ -357,10 +377,11 @@ impl SecurityTokenContract {
         }
 
         // Get current balance from PERSISTENT storage
+        let balance_key = DataKey::Balance(from.clone());
         let current_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(from.clone()))
+            .get(&balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         // Clawback the minimum of requested amount and available balance
@@ -375,10 +396,11 @@ impl SecurityTokenContract {
         let metadata = Self::get_metadata(&env);
 
         // Get issuer's current balance from PERSISTENT storage
+        let issuer_balance_key = DataKey::Balance(metadata.issuer.clone());
         let issuer_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(metadata.issuer.clone()))
+            .get(&issuer_balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         // Update balances in PERSISTENT storage
@@ -387,14 +409,18 @@ impl SecurityTokenContract {
 
         let new_issuer_balance = issuer_balance.checked_add(actual_clawback_amount)
             .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
-        
+
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(from.clone()), &new_balance);
-        
+            .set(&balance_key, &new_balance);
+
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(metadata.issuer.clone()), &new_issuer_balance);
+            .set(&issuer_balance_key, &new_issuer_balance);
+
+        // Extend TTLs for the balance entries
+        Self::extend_persistent_ttl(&env, &balance_key);
+        Self::extend_persistent_ttl(&env, &issuer_balance_key);
 
         // Emit event with actual clawed back amount
         env.events().publish(
@@ -432,6 +458,9 @@ impl SecurityTokenContract {
         admins.push_back(new_admin.clone());
         env.storage().instance().set(&ADMINS_KEY, &admins);
 
+        // Extend instance TTL
+        Self::extend_instance_ttl(&env);
+
         // Emit admin added event
         env.events().publish(
             (symbol_short!("admin"),),
@@ -460,6 +489,9 @@ impl SecurityTokenContract {
         config.authorization_required = required;
         config.authorization_revocable = revocable;
         env.storage().instance().set(&CONFIG_KEY, &config);
+
+        // Extend instance TTL
+        Self::extend_instance_ttl(&env);
 
         // Emit event
         env.events().publish(
@@ -541,16 +573,19 @@ impl SecurityTokenContract {
         }
 
         // Get balances from PERSISTENT storage
+        let issuer_balance_key = DataKey::Balance(metadata.issuer.clone());
+        let beneficiary_balance_key = DataKey::Balance(beneficiary.clone());
+
         let issuer_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(metadata.issuer.clone()))
+            .get(&issuer_balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         let beneficiary_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(beneficiary.clone()))
+            .get(&beneficiary_balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         // Check if issuer has enough tokens
@@ -566,10 +601,14 @@ impl SecurityTokenContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(metadata.issuer.clone()), &new_issuer_balance);
+            .set(&issuer_balance_key, &new_issuer_balance);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(beneficiary.clone()), &new_beneficiary_balance);
+            .set(&beneficiary_balance_key, &new_beneficiary_balance);
+
+        // Extend TTLs for issuer and beneficiary balances
+        Self::extend_persistent_ttl(&env, &issuer_balance_key);
+        Self::extend_persistent_ttl(&env, &beneficiary_balance_key);
 
         // Update USDC balance in INSTANCE storage
         let current_usdc_balance: i128 = env
@@ -656,6 +695,9 @@ impl SecurityTokenContract {
             .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         env.storage().instance().set(&USDC_BAL_KEY, &new_usdc_balance);
 
+        // Extend instance TTL
+        Self::extend_instance_ttl(&env);
+
         // Emit withdrawal event
         env.events().publish(
             (symbol_short!("withdraw"),),
@@ -683,11 +725,54 @@ impl SecurityTokenContract {
         config.transfer_restricted = restricted;
         env.storage().instance().set(&CONFIG_KEY, &config);
 
+        // Extend instance TTL
+        Self::extend_instance_ttl(&env);
+
         // Emit transfer restriction changed event
         env.events().publish(
             (symbol_short!("restrict"),),
             SecurityTokenEvent::TransferRestrictionChanged(restricted),
         );
+
+        Ok(())
+    }
+
+    // Admin function to extend instance storage TTL on-demand
+    pub fn bump_instance_ttl(env: Env, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+
+        // Check if caller is admin
+        if !Self::is_admin(&env, &caller) {
+            return Err(Error::from_contract_error(25));
+        }
+
+        Self::extend_instance_ttl(&env);
+
+        Ok(())
+    }
+
+    // Admin function to extend TTLs for multiple user addresses (bulk operation)
+    pub fn bump_user_ttls(env: Env, caller: Address, addresses: Vec<Address>) -> Result<(), Error> {
+        caller.require_auth();
+
+        // Check if caller is admin
+        if !Self::is_admin(&env, &caller) {
+            return Err(Error::from_contract_error(26));
+        }
+
+        for address in addresses.iter() {
+            // Extend balance TTL if exists
+            let balance_key = DataKey::Balance(address.clone());
+            Self::extend_persistent_ttl(&env, &balance_key);
+
+            // Extend KYC TTL if exists
+            let kyc_key = DataKey::KycVerified(address.clone());
+            Self::extend_persistent_ttl(&env, &kyc_key);
+
+            // Extend compliance TTL if exists
+            let compliance_key = DataKey::ComplianceStatus(address.clone());
+            Self::extend_persistent_ttl(&env, &compliance_key);
+        }
 
         Ok(())
     }
@@ -739,6 +824,22 @@ impl SecurityTokenContract {
     }
 
     // Internal helper functions
+
+    // Helper to extend instance storage TTL
+    fn extend_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND);
+    }
+
+    // Helper to extend persistent storage TTL for a specific key
+    fn extend_persistent_ttl(env: &Env, key: &DataKey) {
+        if env.storage().persistent().has(key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND);
+        }
+    }
 
     // Helper to get config from storage
     fn get_config(env: &Env) -> ContractConfig {
@@ -825,17 +926,20 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(ERR_SELF_TRANSFER_NOT_ALLOWED));
         }
 
+        let from_balance_key = DataKey::Balance(from.clone());
+        let to_balance_key = DataKey::Balance(to.clone());
+
         // Get current balances from PERSISTENT storage
         let from_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(from.clone()))
+            .get(&from_balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         let to_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(to.clone()))
+            .get(&to_balance_key)
             .unwrap_or(INITIAL_BALANCE);
 
         // Check if sender has enough balance
@@ -851,10 +955,14 @@ impl SecurityTokenContract {
 
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(from.clone()), &new_from_balance);
+            .set(&from_balance_key, &new_from_balance);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(to.clone()), &new_to_balance);
+            .set(&to_balance_key, &new_to_balance);
+
+        // Extend TTLs for both sender and receiver balances
+        Self::extend_persistent_ttl(env, &from_balance_key);
+        Self::extend_persistent_ttl(env, &to_balance_key);
 
         Ok(())
     }
