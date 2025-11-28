@@ -28,7 +28,6 @@ pub struct TokenMetadata {
 pub struct ContractConfig {
     pub authorization_required: bool,
     pub authorization_revocable: bool,
-    pub clawback_enabled: bool,
     pub transfer_restricted: bool,
 }
 
@@ -151,7 +150,6 @@ impl SecurityTokenContract {
         let config = ContractConfig {
             authorization_required: true,
             authorization_revocable: true,
-            clawback_enabled: true,
             transfer_restricted: true,
         };
         env.storage().instance().set(&CONFIG_KEY, &config);
@@ -322,10 +320,9 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(5));
         }
 
-        // Check if clawback is enabled
-        let config = Self::get_config(&env);
-        if !config.clawback_enabled {
-            return Err(Error::from_contract_error(6));
+        // Validate amount is positive
+        if amount <= 0 {
+            return Err(Error::from_contract_error(25));
         }
 
         // Get current balance from PERSISTENT storage
@@ -335,22 +332,43 @@ impl SecurityTokenContract {
             .get(&DataKey::Balance(from.clone()))
             .unwrap_or(0);
 
-        if current_balance < amount {
-            return Err(Error::from_contract_error(7));
-        }
+        // Clawback the minimum of requested amount and available balance
+        // This ensures we take what's available rather than failing if exact amount isn't present
+        let actual_clawback_amount = if current_balance < amount {
+            current_balance
+        } else {
+            amount
+        };
 
-        // Update balance in PERSISTENT storage
-        let new_balance = current_balance.checked_sub(amount)
+        // Get issuer address from metadata
+        let metadata = Self::get_metadata(&env);
+        
+        // Get issuer's current balance from PERSISTENT storage
+        let issuer_balance: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Balance(metadata.issuer.clone()))
+            .unwrap_or(0);
+
+        // Update balances in PERSISTENT storage
+        let new_balance = current_balance.checked_sub(actual_clawback_amount)
+            .ok_or(Error::from_contract_error(14))?;
+        
+        let new_issuer_balance = issuer_balance.checked_add(actual_clawback_amount)
             .ok_or(Error::from_contract_error(14))?;
         
         env.storage()
             .persistent()
             .set(&DataKey::Balance(from.clone()), &new_balance);
+        
+        env.storage()
+            .persistent()
+            .set(&DataKey::Balance(metadata.issuer.clone()), &new_issuer_balance);
 
-        // Emit event
+        // Emit event with actual clawed back amount
         env.events().publish(
             (symbol_short!("clawback"),),
-            SecurityTokenEvent::ClawbackExecuted(from.clone(), amount),
+            SecurityTokenEvent::ClawbackExecuted(from.clone(), actual_clawback_amount),
         );
 
         Ok(())
