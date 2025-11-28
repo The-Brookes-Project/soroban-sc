@@ -49,6 +49,10 @@ const ERR_INSUFFICIENT_USDC_IN_CONTRACT: u32 = 22;
 const ERR_USDC_WITHDRAWAL_VERIFICATION_FAILED: u32 = 23;
 const ERR_SELF_TRANSFER_NOT_ALLOWED: u32 = 24;
 const ERR_AUTHORIZATION_NOT_REVOCABLE: u32 = 25;
+const ERR_NOT_ISSUER: u32 = 26;
+const ERR_CANNOT_REMOVE_ISSUER: u32 = 27;
+const ERR_NOT_AN_ADMIN: u32 = 28;
+const ERR_NOT_ADMIN_TTL: u32 = 29;
 
 // Define token metadata structure
 #[contracttype]
@@ -471,17 +475,17 @@ impl SecurityTokenContract {
 
         // Check if caller is issuer
         if !Self::is_issuer(&env, &caller) {
-            return Err(Error::from_contract_error(25)); // Only issuer can remove admins
+            return Err(Error::from_contract_error(ERR_NOT_ISSUER));
         }
 
         // Check if trying to remove the issuer
         if Self::is_issuer(&env, &admin_to_remove) {
-            return Err(Error::from_contract_error(26)); // Cannot remove issuer
+            return Err(Error::from_contract_error(ERR_CANNOT_REMOVE_ISSUER));
         }
 
         // Check if the address is actually an admin
         if !Self::is_admin(&env, &admin_to_remove) {
-            return Err(Error::from_contract_error(27)); // Address is not an admin
+            return Err(Error::from_contract_error(ERR_NOT_AN_ADMIN));
         }
 
         // Get current admin list from INSTANCE storage
@@ -767,7 +771,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(25));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_TTL));
         }
 
         Self::extend_instance_ttl(&env);
@@ -781,7 +785,7 @@ impl SecurityTokenContract {
 
         // Check if caller is admin
         if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(26));
+            return Err(Error::from_contract_error(ERR_NOT_ADMIN_TTL));
         }
 
         for address in addresses.iter() {
