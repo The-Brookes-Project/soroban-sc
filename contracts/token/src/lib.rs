@@ -104,6 +104,7 @@ pub enum SecurityTokenEvent {
     Purchase(Address, Address, i128, i128), // buyer, beneficiary, token_amount, usdc_amount
     UsdcWithdrawn(Address, i128), // admin, amount
     AdminAdded(Address, Address), // admin, new_admin
+    AdminRemoved(Address, Address), // issuer, removed_admin
     TransferRestrictionChanged(bool), // restricted status
 }
 
@@ -376,13 +377,9 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(ERR_INVALID_AMOUNT));
         }
 
-        // Get current balance from PERSISTENT storage
+        // Get current balance using helper
         let balance_key = DataKey::Balance(from.clone());
-        let current_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&balance_key)
-            .unwrap_or(INITIAL_BALANCE);
+        let current_balance = Self::balance(env.clone(), from.clone());
 
         // Clawback the minimum of requested amount and available balance
         // This ensures we take what's available rather than failing if exact amount isn't present
@@ -431,13 +428,18 @@ impl SecurityTokenContract {
         Ok(())
     }
 
-    // Add an admin to the token
+    // Add an admin to the token (issuer only)
     pub fn add_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), Error> {
         caller.require_auth();
 
-        // Check if caller is admin
-        if !Self::is_admin(&env, &caller) {
+        // Check if caller is issuer (only issuer can add admins)
+        if !Self::is_issuer(&env, &caller) {
             return Err(Error::from_contract_error(ERR_NOT_ADMIN_ADD_ADMIN));
+        }
+
+        // Check if already an admin using helper
+        if Self::is_admin(&env, &new_admin) {
+            return Err(Error::from_contract_error(ERR_DUPLICATE_ADMIN));
         }
 
         // Get current admin list from INSTANCE storage
@@ -446,13 +448,6 @@ impl SecurityTokenContract {
             .instance()
             .get(&ADMINS_KEY)
             .unwrap();
-
-        // Check if already an admin
-        for existing_admin in admins.iter() {
-            if &existing_admin == &new_admin {
-                return Err(Error::from_contract_error(ERR_DUPLICATE_ADMIN));
-            }
-        }
 
         // Add to admin list
         admins.push_back(new_admin.clone());
@@ -465,6 +460,52 @@ impl SecurityTokenContract {
         env.events().publish(
             (symbol_short!("admin"),),
             SecurityTokenEvent::AdminAdded(caller.clone(), new_admin),
+        );
+
+        Ok(())
+    }
+
+    // Remove an admin from the token
+    pub fn remove_admin(env: Env, caller: Address, admin_to_remove: Address) -> Result<(), Error> {
+        caller.require_auth();
+
+        // Check if caller is issuer
+        if !Self::is_issuer(&env, &caller) {
+            return Err(Error::from_contract_error(25)); // Only issuer can remove admins
+        }
+
+        // Check if trying to remove the issuer
+        if Self::is_issuer(&env, &admin_to_remove) {
+            return Err(Error::from_contract_error(26)); // Cannot remove issuer
+        }
+
+        // Check if the address is actually an admin
+        if !Self::is_admin(&env, &admin_to_remove) {
+            return Err(Error::from_contract_error(27)); // Address is not an admin
+        }
+
+        // Get current admin list from INSTANCE storage
+        let admins: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&ADMINS_KEY)
+            .unwrap();
+
+        // Remove the admin from the list
+        let mut new_admins = Vec::new(&env);
+        for admin in admins.iter() {
+            if &admin != &admin_to_remove {
+                new_admins.push_back(admin);
+            }
+        }
+
+        // Update storage with new admin list
+        env.storage().instance().set(&ADMINS_KEY, &new_admins);
+
+        // Emit admin removed event
+        env.events().publish(
+            (symbol_short!("adminrem"),),
+            SecurityTokenEvent::AdminRemoved(caller.clone(), admin_to_remove),
         );
 
         Ok(())
@@ -572,21 +613,12 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(ERR_USDC_TRANSFER_VERIFICATION_FAILED));
         }
 
-        // Get balances from PERSISTENT storage
+        // Get balances using helper functions
         let issuer_balance_key = DataKey::Balance(metadata.issuer.clone());
         let beneficiary_balance_key = DataKey::Balance(beneficiary.clone());
 
-        let issuer_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&issuer_balance_key)
-            .unwrap_or(INITIAL_BALANCE);
-
-        let beneficiary_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&beneficiary_balance_key)
-            .unwrap_or(INITIAL_BALANCE);
+        let issuer_balance = Self::balance(env.clone(), metadata.issuer.clone());
+        let beneficiary_balance = Self::balance(env.clone(), beneficiary.clone());
 
         // Check if issuer has enough tokens
         if issuer_balance < token_amount {
@@ -610,12 +642,8 @@ impl SecurityTokenContract {
         Self::extend_persistent_ttl(&env, &issuer_balance_key);
         Self::extend_persistent_ttl(&env, &beneficiary_balance_key);
 
-        // Update USDC balance in INSTANCE storage
-        let current_usdc_balance: i128 = env
-            .storage()
-            .instance()
-            .get(&USDC_BAL_KEY)
-            .unwrap_or(INITIAL_BALANCE);
+        // Update USDC balance using helper
+        let current_usdc_balance = Self::usdc_balance(env.clone());
         let new_usdc_balance = current_usdc_balance.checked_add(usdc_amount)
             .ok_or(Error::from_contract_error(ERR_INSUFFICIENT_BALANCE))?;
         env.storage().instance().set(&USDC_BAL_KEY, &new_usdc_balance);
@@ -642,12 +670,8 @@ impl SecurityTokenContract {
             return Err(Error::from_contract_error(ERR_NOT_ADMIN_WITHDRAW));
         }
 
-        // Get USDC balance from INSTANCE storage
-        let usdc_balance: i128 = env
-            .storage()
-            .instance()
-            .get(&USDC_BAL_KEY)
-            .unwrap_or(INITIAL_BALANCE);
+        // Get USDC balance using helper
+        let usdc_balance = Self::usdc_balance(env.clone());
 
         // Validate amount
         if amount <= 0 || amount > usdc_balance {
@@ -823,6 +847,12 @@ impl SecurityTokenContract {
         metadata.usdc_price
     }
 
+    // View function to get the issuer address
+    pub fn get_issuer(env: Env) -> Address {
+        let metadata = Self::get_metadata(&env);
+        metadata.issuer
+    }
+
     // Internal helper functions
 
     // Helper to extend instance storage TTL
@@ -865,6 +895,12 @@ impl SecurityTokenContract {
         false
     }
 
+    // Helper to check if address is the issuer
+    fn is_issuer(env: &Env, address: &Address) -> bool {
+        let metadata = Self::get_metadata(env);
+        &metadata.issuer == address
+    }
+
     // Helper to check compliance requirements
     fn check_compliance_requirements(
         env: &Env,
@@ -874,35 +910,17 @@ impl SecurityTokenContract {
     ) -> Result<(), Error> {
         // Check authorization required flag
         if config.authorization_required {
-            // Check KYC status for both addresses from PERSISTENT storage
-            let from_kyc = env
-                .storage()
-                .persistent()
-                .get(&DataKey::KycVerified(from.clone()))
-                .unwrap_or(false);
-
-            let to_kyc = env
-                .storage()
-                .persistent()
-                .get(&DataKey::KycVerified(to.clone()))
-                .unwrap_or(false);
+            // Check KYC status for both addresses
+            let from_kyc = Self::is_kyc_verified(env.clone(), from.clone());
+            let to_kyc = Self::is_kyc_verified(env.clone(), to.clone());
 
             if !from_kyc || !to_kyc {
                 return Err(Error::from_contract_error(ERR_KYC_NOT_VERIFIED));
             }
 
-            // Check compliance status for both addresses from PERSISTENT storage
-            let from_compliance = env
-                .storage()
-                .persistent()
-                .get(&DataKey::ComplianceStatus(from.clone()))
-                .unwrap_or(ComplianceStatus::Pending);
-
-            let to_compliance = env
-                .storage()
-                .persistent()
-                .get(&DataKey::ComplianceStatus(to.clone()))
-                .unwrap_or(ComplianceStatus::Pending);
+            // Check compliance status for both addresses
+            let from_compliance = Self::check_compliance(env.clone(), from.clone());
+            let to_compliance = Self::check_compliance(env.clone(), to.clone());
 
             if from_compliance != ComplianceStatus::Approved
                 || to_compliance != ComplianceStatus::Approved
@@ -929,18 +947,9 @@ impl SecurityTokenContract {
         let from_balance_key = DataKey::Balance(from.clone());
         let to_balance_key = DataKey::Balance(to.clone());
 
-        // Get current balances from PERSISTENT storage
-        let from_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&from_balance_key)
-            .unwrap_or(INITIAL_BALANCE);
-
-        let to_balance: i128 = env
-            .storage()
-            .persistent()
-            .get(&to_balance_key)
-            .unwrap_or(INITIAL_BALANCE);
+        // Get current balances using helper
+        let from_balance = Self::balance(env.clone(), from.clone());
+        let to_balance = Self::balance(env.clone(), to.clone());
 
         // Check if sender has enough balance
         if from_balance < amount {
