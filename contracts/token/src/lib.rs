@@ -106,6 +106,12 @@ impl SecurityTokenContract {
         if home_domain.len() == 0 {
             panic!("Home domain cannot be empty");
         }
+        if name.len() == 0 {
+            panic!("Name cannot be empty");
+        }
+        if symbol.len() == 0 {
+            panic!("Symbol cannot be empty");
+        }
 
         // Validate USDC token address
         // Prevent setting the contract's own address as USDC token

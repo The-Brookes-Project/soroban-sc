@@ -819,6 +819,66 @@ fn test_initialize_empty_home_domain() {
 }
 
 #[test]
+#[should_panic(expected = "Name cannot be empty")]
+fn test_initialize_empty_name() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    // Initialize token with empty name
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, ""), // Empty name should panic
+            String::from_str(&env, "SCTY"),
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
+#[should_panic(expected = "Symbol cannot be empty")]
+fn test_initialize_empty_symbol() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(SecurityTokenContract, ());
+    let issuer = Address::generate(&env);
+    let admin = Address::generate(&env);
+
+    // Setup test USDC token contract
+    let usdc_token = create_token_contract(&env, &admin);
+    let usdc_token_client = usdc_token.0;
+
+    // Initialize token with empty symbol
+    env.as_contract(&contract_id, || {
+        SecurityTokenContract::initialize(
+            env.clone(),
+            String::from_str(&env, "Security Token"),
+            String::from_str(&env, ""), // Empty symbol should panic
+            6,
+            1_000_000_000_000,
+            issuer.clone(),
+            String::from_str(&env, "example.com"),
+            admin.clone(),
+            100_000,
+            usdc_token_client.address
+        )
+    });
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #24)")]
 fn test_transfer_edge_cases() {
     let env = Env::default();
