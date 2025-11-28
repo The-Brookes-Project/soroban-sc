@@ -60,7 +60,7 @@ pub enum SecurityTokenEvent {
     KycVerified(Address, bool), // address, status
     AuthorizationChanged(bool, bool), // required, revocable
     ClawbackExecuted(Address, i128), // from, amount
-    Purchase(Address, i128, i128), // buyer, token_amount, usdc_amount
+    Purchase(Address, Address, i128, i128), // buyer, beneficiary, token_amount, usdc_amount
     UsdcWithdrawn(Address, i128), // admin, amount
     AdminAdded(Address, Address), // admin, new_admin
     TransferRestrictionChanged(bool), // restricted status
@@ -417,6 +417,7 @@ impl SecurityTokenContract {
     pub fn purchase(
         env: Env,
         buyer: Address,
+        beneficiary: Address,
         token_amount: i128,
     ) -> Result<(), Error> {
         buyer.require_auth();
@@ -429,9 +430,10 @@ impl SecurityTokenContract {
         // Load metadata from instance storage
         let metadata = Self::get_metadata(&env);
 
-        // Check KYC and compliance status for buyer
+        // Check KYC and compliance status for buyer and beneficiary
         let config = Self::get_config(&env);
         Self::check_compliance_requirements(&env, &config, &metadata.issuer, &buyer)?;
+        Self::check_compliance_requirements(&env, &config, &metadata.issuer, &beneficiary)?;
 
         // Calculate USDC amount needed
         let decimals_pow = 10i128.checked_pow(metadata.decimals)
@@ -488,10 +490,10 @@ impl SecurityTokenContract {
             .get(&DataKey::Balance(metadata.issuer.clone()))
             .unwrap_or(0);
 
-        let buyer_balance: i128 = env
+        let beneficiary_balance: i128 = env
             .storage()
             .persistent()
-            .get(&DataKey::Balance(buyer.clone()))
+            .get(&DataKey::Balance(beneficiary.clone()))
             .unwrap_or(0);
 
         // Check if issuer has enough tokens
@@ -502,7 +504,7 @@ impl SecurityTokenContract {
         // Update token balances in PERSISTENT storage
         let new_issuer_balance = issuer_balance.checked_sub(token_amount)
             .ok_or(Error::from_contract_error(14))?;
-        let new_buyer_balance = buyer_balance.checked_add(token_amount)
+        let new_beneficiary_balance = beneficiary_balance.checked_add(token_amount)
             .ok_or(Error::from_contract_error(14))?;
 
         env.storage()
@@ -510,7 +512,7 @@ impl SecurityTokenContract {
             .set(&DataKey::Balance(metadata.issuer.clone()), &new_issuer_balance);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(buyer.clone()), &new_buyer_balance);
+            .set(&DataKey::Balance(beneficiary.clone()), &new_beneficiary_balance);
 
         // Update USDC balance in INSTANCE storage
         let current_usdc_balance: i128 = env
@@ -525,7 +527,7 @@ impl SecurityTokenContract {
         // Emit purchase event
         env.events().publish(
             (symbol_short!("purchase"),),
-            SecurityTokenEvent::Purchase(buyer.clone(), token_amount, usdc_amount),
+            SecurityTokenEvent::Purchase(buyer.clone(), beneficiary.clone(), token_amount, usdc_amount),
         );
 
         Ok(())
