@@ -41,7 +41,6 @@ const ERR_INSUFFICIENT_BALANCE: u32 = 14;
 const ERR_INVALID_PURCHASE_AMOUNT: u32 = 15;
 const ERR_CALCULATION_OVERFLOW: u32 = 16;
 const ERR_INSUFFICIENT_ISSUER_TOKENS: u32 = 17;
-const ERR_NOT_ADMIN_WITHDRAW: u32 = 18;
 const ERR_INVALID_WITHDRAW_AMOUNT: u32 = 19;
 const ERR_INSUFFICIENT_USDC_BALANCE: u32 = 20;
 const ERR_USDC_TRANSFER_VERIFICATION_FAILED: u32 = 21;
@@ -661,7 +660,7 @@ impl SecurityTokenContract {
         Ok(())
     }
 
-    // Admin function to withdraw accumulated USDC
+    // Issuer-only function to withdraw accumulated USDC
     pub fn withdraw_usdc(
         env: Env,
         caller: Address,
@@ -669,9 +668,9 @@ impl SecurityTokenContract {
     ) -> Result<(), Error> {
         caller.require_auth();
 
-        // Check if caller is admin
-        if !Self::is_admin(&env, &caller) {
-            return Err(Error::from_contract_error(ERR_NOT_ADMIN_WITHDRAW));
+        // Check if caller is issuer (only issuer can withdraw USDC)
+        if !Self::is_issuer(&env, &caller) {
+            return Err(Error::from_contract_error(ERR_NOT_ISSUER));
         }
 
         // Get USDC balance using helper
