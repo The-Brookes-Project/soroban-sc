@@ -224,14 +224,14 @@ fn test_purchase_and_withdraw() {
     assert_eq!(buyer_usdc_balance, 950_000_000); // 1B - 50M
     assert_eq!(contract_usdc_balance, 50_000_000);
 
-    // Admin withdraws USDC
-    client.withdraw_usdc(&admin, &30_000_000);
+    // Issuer withdraws USDC
+    client.withdraw_usdc(&issuer, &30_000_000);
 
     // Check balances after withdrawal
-    let admin_usdc_balance = usdc_token_client.balance(&admin);
+    let issuer_usdc_balance = usdc_token_client.balance(&issuer);
     let updated_contract_usdc_balance = client.usdc_balance();
 
-    assert_eq!(admin_usdc_balance, 30_000_000);
+    assert_eq!(issuer_usdc_balance, 30_000_000);
     assert_eq!(updated_contract_usdc_balance, 20_000_000); // 50M - 30M
 }
 
@@ -856,12 +856,12 @@ fn test_withdraw_usdc_edge_cases() {
     // Make a purchase to accumulate USDC
     client.purchase(&buyer, &buyer, &500_000_000);
 
-    // Test partial withdrawal
-    client.withdraw_usdc(&admin, &25_000_000);
+    // Test partial withdrawal (issuer only)
+    client.withdraw_usdc(&issuer, &25_000_000);
     assert_eq!(client.usdc_balance(), 25_000_000);
 
-    // Test full withdrawal
-    client.withdraw_usdc(&admin, &25_000_000);
+    // Test full withdrawal (issuer only)
+    client.withdraw_usdc(&issuer, &25_000_000);
     assert_eq!(client.usdc_balance(), 0);
 }
 
@@ -883,7 +883,7 @@ fn test_withdraw_usdc_unauthorized() {
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
-    // Non-admin tries to withdraw USDC
+    // Non-issuer tries to withdraw USDC (should fail)
     client.withdraw_usdc(&non_admin, &10_000_000);
 }
 
@@ -928,8 +928,8 @@ fn test_withdraw_usdc_exceeds_balance() {
     // Make a purchase to accumulate USDC
     client.purchase(&buyer, &buyer, &500_000_000);
 
-    // Try to withdraw more than available
-    client.withdraw_usdc(&admin, &100_000_000);
+    // Try to withdraw more than available (issuer only)
+    client.withdraw_usdc(&issuer, &100_000_000);
 }
 
 // ===== Additional Tests for 100% Coverage =====
@@ -1037,8 +1037,8 @@ fn test_withdraw_usdc_negative_amount() {
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
-    // Try to withdraw negative amount
-    client.withdraw_usdc(&admin, &-10_000_000);
+    // Try to withdraw negative amount (issuer only)
+    client.withdraw_usdc(&issuer, &-10_000_000);
 }
 
 #[test]
@@ -1058,8 +1058,8 @@ fn test_withdraw_usdc_zero_amount() {
 
     let client = SecurityTokenContractClient::new(&env, &contract_id);
 
-    // Try to withdraw zero amount
-    client.withdraw_usdc(&admin, &0);
+    // Try to withdraw zero amount (issuer only)
+    client.withdraw_usdc(&issuer, &0);
 }
 
 #[test]
@@ -1292,8 +1292,8 @@ fn test_usdc_balance_tracking() {
     client.purchase(&buyer, &buyer, &300_000_000);
     assert_eq!(client.usdc_balance(), 80_000_000);
 
-    // Withdraw and check balance
-    client.withdraw_usdc(&admin, &30_000_000);
+    // Withdraw and check balance (issuer only)
+    client.withdraw_usdc(&issuer, &30_000_000);
     assert_eq!(client.usdc_balance(), 50_000_000);
 }
 
